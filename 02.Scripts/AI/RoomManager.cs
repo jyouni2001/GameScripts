@@ -58,7 +58,7 @@ namespace JY
                 reputationSystem = ReputationSystem.Instance;
                 if (reputationSystem == null)
                 {
-                    reputationSystem = FindObjectOfType<ReputationSystem>();
+                    reputationSystem = FindFirstObjectByType<ReputationSystem>();
                 }
             }
             

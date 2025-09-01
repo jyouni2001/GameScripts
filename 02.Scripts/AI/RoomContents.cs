@@ -107,7 +107,7 @@ namespace JY
             furnitureList.Clear();
             
             // 씬의 모든 FurnitureID 컴포넌트 찾기
-            var allFurniture = GameObject.FindObjectsOfType<FurnitureID>();
+            var allFurniture = GameObject.FindObjectsByType<FurnitureID>(FindObjectsSortMode.None);
             
             // roomBounds 안에 있는 가구만 필터링
             foreach (var furniture in allFurniture)

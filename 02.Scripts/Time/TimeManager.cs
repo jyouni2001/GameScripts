@@ -26,6 +26,19 @@ namespace JY
         [SerializeField] private LocalizedString dayCounterLocalizedString;
         #endregion
 
+        #region Static Initialization
+        
+        /// <summary>
+        /// Static 필드 초기화
+        /// </summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void InitializeStatics()
+        {
+            instance = null;
+        }
+        
+        #endregion
+
         #region Unity Lifecycle Methods
 
         private void Awake()

@@ -31,9 +31,7 @@ public class AIAgent : MonoBehaviour
     private bool isWaitingForService = false;     // 서비스 대기 중인지 여부
 
     private AIState currentState = AIState.MovingToQueue;  // 현재 AI 상태
-    private float counterWaitTime = 5f;           // 카운터 처리 시간
     private string currentDestination = "대기열로 이동 중";  // 현재 목적지 (UI 표시용)
-    private bool isBeingServed = false;           // 서비스 받고 있는지 여부
 
     private static readonly object lockObject = new object();  // 스레드 동기화용 잠금 객체
     private Coroutine wanderingCoroutine;         // 배회 코루틴 참조
@@ -113,8 +111,10 @@ public class AIAgent : MonoBehaviour
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void InitializeStatics()
     {
-        roomList.Clear();
+        roomList = new List<RoomInfo>();
+        OnRoomsUpdated -= UpdateRoomList;
         OnRoomsUpdated = null;
+        globalShowDebugUI = true;
     }
 
     void Start()
@@ -147,7 +147,7 @@ public class AIAgent : MonoBehaviour
             return false;
         }
 
-        roomManager = FindObjectOfType<RoomManager>();
+        roomManager = FindFirstObjectByType<RoomManager>();
         spawnPoint = spawn.transform;
 
         GameObject counter = GameObject.FindGameObjectWithTag("Counter");
@@ -155,7 +155,7 @@ public class AIAgent : MonoBehaviour
 
         if (counterManager == null)
         {
-            counterManager = FindObjectOfType<CounterManager>();
+            counterManager = FindFirstObjectByType<CounterManager>();
             if (counterManager == null)
             {
                 Debug.LogWarning($"AI {gameObject.name}: CounterManager를 찾을 수 없습니다.");
@@ -243,7 +243,6 @@ public class AIAgent : MonoBehaviour
 
         lock (lockObject)
         {
-            bool isUpdated = false;
             HashSet<string> processedRoomIds = new HashSet<string>();
             List<RoomInfo> updatedRoomList = new List<RoomInfo>();
 
@@ -264,7 +263,6 @@ public class AIAgent : MonoBehaviour
                         else
                         {
                             updatedRoomList.Add(newRoom);
-                            isUpdated = true;
                         }
                     }
                 }
@@ -815,10 +813,6 @@ public class AIAgent : MonoBehaviour
     private void TransitionToState(AIState newState)
     {
         CleanupCoroutines();
-        if (currentState == AIState.UsingRoom)
-        {
-            isBeingServed = false;
-        }
 
         currentState = newState;
         currentDestination = GetStateDescription(newState);
@@ -919,7 +913,7 @@ public class AIAgent : MonoBehaviour
             }
         }
 
-        var roomManager = FindObjectOfType<RoomManager>();
+        var roomManager = FindFirstObjectByType<RoomManager>();
         if (roomManager != null)
         {
             Debug.Log($"[AIAgent] RoomManager 발견. ProcessRoomPayment 호출 - AI: {gameObject.name}");
@@ -1428,7 +1422,6 @@ public class AIAgent : MonoBehaviour
             }
         }
 
-        isBeingServed = false;
         isInQueue = false;
         isWaitingForService = false;
         isScheduledForDespawn = false; // 디스폰 예정 플래그 리셋
@@ -1463,7 +1456,6 @@ public class AIAgent : MonoBehaviour
     {
         currentState = AIState.MovingToQueue;
         currentDestination = "대기열로 이동 중";
-        isBeingServed = false;
         isInQueue = false;
         isWaitingForService = false;
         currentRoomIndex = -1;
