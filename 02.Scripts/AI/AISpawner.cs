@@ -295,10 +295,10 @@ namespace JY
                 }
             }
             
-            // 오늘 남은 스폰 시간이 없으면 내일 첫 번째 스폰 시간
+            // 오늘 남은 스폰 시간이 없으면 내일 첫 번째 스폰 시간 (시간만 반환, 날짜는 별도 관리)
             if (spawnTimes.Count > 0)
             {
-                return spawnTimes[0] * 60 + 1440; // 1440분 = 24시간
+                return spawnTimes[0] * 60; // 다음날의 첫 번째 스폰 시간 (시간만)
             }
             
             return 0f;

@@ -31,7 +31,9 @@ public class AIAgent : MonoBehaviour
     private bool isWaitingForService = false;     // 서비스 대기 중인지 여부
 
     private AIState currentState = AIState.MovingToQueue;  // 현재 AI 상태
+    private float counterWaitTime = 5f;           // 카운터 처리 시간
     private string currentDestination = "대기열로 이동 중";  // 현재 목적지 (UI 표시용)
+    private bool isBeingServed = false;           // 서비스 받고 있는지 여부
 
     private static readonly object lockObject = new object();  // 스레드 동기화용 잠금 객체
     private Coroutine wanderingCoroutine;         // 배회 코루틴 참조
@@ -46,12 +48,25 @@ public class AIAgent : MonoBehaviour
     private int lastBehaviorUpdateHour = -1;      // 마지막 행동 업데이트 시간
     private bool isScheduledForDespawn = false;   // 11시 디스폰 예정인지 여부
     
+    // 침대 관련 변수들
+    private GameObject currentBed;                // 현재 사용 중인 침대
+    private Transform bedPosition;                // 침대 위치
+    private Coroutine sleepingCoroutine;         // 수면 코루틴 참조
+    private bool isSleeping = false;             // 수면 중인지 여부
+    
+    // 침대 진입 전 위치 기억용 변수 추가
+    private Vector3 positionBeforeBed;           // 침대 진입 전 위치
+    private Quaternion rotationBeforeBed;        // 침대 진입 전 회전값
+    private bool hasStoredPosition = false;      // 위치 저장 여부
+    
     [Header("UI 디버그")]
     [Tooltip("모든 AI 머리 위에 행동 상태 텍스트 표시")]
     [SerializeField] private bool debugUIEnabled = true;
     
     // 모든 AI가 공유하는 static 변수
     private static bool globalShowDebugUI = true;
+
+    private Animator animator; // 애니메이터 컴포넌트 추가
     #endregion
 
     #region 룸 정보 클래스
@@ -98,7 +113,9 @@ public class AIAgent : MonoBehaviour
         ReportingRoom,       // 방 사용 완료 보고
         ReturningToSpawn,    // 스폰 지점으로 복귀 (디스폰)
         RoomWandering,       // 방 내부 배회
-        ReportingRoomQueue   // 방 사용 완료 보고를 위해 대기열로 이동
+        ReportingRoomQueue,  // 방 사용 완료 보고를 위해 대기열로 이동
+        MovingToBed,         // 침대로 이동
+        SleepingInBed        // 침대에서 수면
     }
     #endregion
 
@@ -111,8 +128,7 @@ public class AIAgent : MonoBehaviour
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void InitializeStatics()
     {
-        roomList = new List<RoomInfo>();
-        OnRoomsUpdated -= UpdateRoomList;
+        roomList.Clear();
         OnRoomsUpdated = null;
         globalShowDebugUI = true;
     }
@@ -132,6 +148,11 @@ public class AIAgent : MonoBehaviour
     private bool InitializeComponents()
     {
         agent = GetComponent<NavMeshAgent>();
+        animator = GetComponent<Animator>(); // Animator 컴포넌트 가져오기
+        if (animator == null)
+        {
+            Debug.LogWarning($"AI {gameObject.name}: Animator 컴포넌트가 없습니다. 애니메이션 기능을 사용할 수 없습니다.");
+        }
         if (agent == null)
         {
             Debug.LogError($"AI {gameObject.name}: NavMeshAgent 컴포넌트가 없습니다.");
@@ -307,8 +328,29 @@ public class AIAgent : MonoBehaviour
             // 0:00 ~ 9:00
             if (currentRoomIndex != -1)
             {
-                TransitionToState(AIState.RoomWandering);
-                Debug.Log($"AI {gameObject.name}: 0~9시, 방 내부 배회.");
+                // 침대가 있는지 확인하고 침대 사용
+                if (currentBed == null)
+                {
+                    currentBed = FindBedInRoom();
+                    Debug.Log($"AI {gameObject.name}: 0~9시, 방 {currentRoomIndex + 1}번에서 침대 검색 결과: {(currentBed != null ? currentBed.name : "없음")}");
+                }
+                
+                if (currentBed != null && !isSleeping)
+                {
+                    TransitionToState(AIState.MovingToBed);
+                    Debug.Log($"AI {gameObject.name}: 0~9시, 방 {currentRoomIndex + 1}번의 침대로 이동 시작.");
+                }
+                else if (isSleeping)
+                {
+                    // 이미 수면 중이면 계속 수면
+                    Debug.Log($"AI {gameObject.name}: 0~9시, 이미 침대에서 수면 중.");
+                }
+                else
+                {
+                    // 침대가 없으면 기존 행동
+                    TransitionToState(AIState.RoomWandering);
+                    Debug.Log($"AI {gameObject.name}: 0~9시, 침대 없음, 방 내부 배회.");
+                }
             }
             else
             {
@@ -320,11 +362,21 @@ public class AIAgent : MonoBehaviour
             // 9:00 ~ 11:00
             if (currentRoomIndex != -1)
             {
-                TransitionToState(AIState.ReportingRoomQueue);
+                // 9시가 되면 침대에서 일어남
+                if (isSleeping)
+                {
+                    Debug.Log($"AI {gameObject.name}: 9시, 침대에서 일어남.");
+                    WakeUpFromBed();
+                    return; // WakeUpFromBed에서 이미 상태를 변경했으므로 여기서 종료
+                }
+                
+                // 수면 중이 아니고 방이 있으면 방 사용 완료 보고로 이동
                 Debug.Log($"AI {gameObject.name}: 9~11시, 방 사용 완료 보고 대기열로 이동.");
+                TransitionToState(AIState.ReportingRoomQueue);
             }
             else
             {
+                // 방이 없으면 기본 행동
                 FallbackBehavior();
             }
         }
@@ -397,13 +449,34 @@ public class AIAgent : MonoBehaviour
     private void Handle17OClockForcedDespawn()
     {
         // 방 사용 중인 AI는 디스폰하지 않음
-        if (IsInRoomRelatedState())
+        if (IsInRoomRelatedState() || isSleeping)
         {
-            Debug.Log($"AI {gameObject.name}: 17:00, 방 사용 중이므로 디스폰하지 않음 (상태: {currentState}).");
+            Debug.Log($"AI {gameObject.name}: 17:00, 방 사용 또는 수면 중이므로 디스폰하지 않음 (상태: {currentState}).");
             return;
         }
 
         Debug.Log($"AI {gameObject.name}: 17:00, 강제 디스폰 시작 (현재 상태: {currentState}).");
+
+        // 침대에서 일어나기
+        if (isSleeping)
+        {
+            WakeUpFromBed();
+        }
+        
+        // 부모-자식 관계 해제
+        if (transform.parent != null)
+        {
+            transform.SetParent(null);
+        }
+        
+        // 저장된 위치로 복귀
+        if (hasStoredPosition)
+        {
+            transform.position = positionBeforeBed;
+            transform.rotation = rotationBeforeBed;
+            hasStoredPosition = false;
+            Debug.Log($"AI {gameObject.name}: 17시 강제 디스폰 시 저장된 위치로 복귀");
+        }
 
         // 모든 코루틴 강제 종료
         CleanupCoroutines();
@@ -424,18 +497,6 @@ public class AIAgent : MonoBehaviour
         TransitionToState(AIState.ReturningToSpawn);
         agent.SetDestination(spawnPoint.position);
         Debug.Log($"AI {gameObject.name}: 17:00, 강제 디스폰 실행.");
-    }
-
-    /// <summary>
-    /// 방 관련 상태인지 확인합니다.
-    /// </summary>
-    private bool IsInRoomRelatedState()
-    {
-        return (currentState == AIState.UsingRoom || 
-                currentState == AIState.UseWandering || 
-                currentState == AIState.RoomWandering ||
-                currentState == AIState.MovingToRoom) && 
-                currentRoomIndex != -1;
     }
 
     /// <summary>
@@ -460,6 +521,8 @@ public class AIAgent : MonoBehaviour
         return currentState == AIState.WaitingInQueue || 
                currentState == AIState.MovingToQueue || 
                currentState == AIState.MovingToRoom || 
+               currentState == AIState.MovingToBed ||
+               currentState == AIState.SleepingInBed ||
                currentState == AIState.ReportingRoom ||
                currentState == AIState.ReportingRoomQueue ||
                currentState == AIState.ReturningToSpawn ||
@@ -556,12 +619,34 @@ public class AIAgent : MonoBehaviour
         {
             globalShowDebugUI = debugUIEnabled;
         }
+        
+        // 수면 중일 때는 위치 고정 (부모-자식 관계가 설정된 경우)
+        if (isSleeping && currentBed != null && transform.parent == currentBed.transform)
+        {
+            // 침대 위 위치로 고정 (부모 기준 상대 위치)
+            Vector3 bedTopPosition = Vector3.zero + Vector3.up * 0.5f;
+            transform.localPosition = bedTopPosition;
+        }
+
+        // 애니메이션 업데이트: Moving Bool 설정 (기본 이동 애니메이션)
+        if (animator != null && !isSleeping)
+        {
+            animator.SetBool("Moving", agent.velocity.magnitude > 0.1f);
+        }
 
         // 시간 기반 행동 갱신
         if (timeSystem != null)
         {
             int hour = timeSystem.CurrentHour;
             int minute = timeSystem.CurrentMinute;
+
+            // 9시 정각에 수면 중인 AI를 강제로 깨움 (추가된 부분)
+            if (hour == 9 && minute == 0 && isSleeping)
+            {
+                Debug.Log($"AI {gameObject.name}: 9시 정각, 수면 중인 AI 강제로 깨움");
+                WakeUpFromBed();
+                return;
+            }
 
             // 17:00에 방 사용 중이 아닌 모든 에이전트 강제 디스폰
             if (hour == 17 && minute == 0)
@@ -627,6 +712,12 @@ public class AIAgent : MonoBehaviour
                         StartCoroutine(UseRoom());
                     }
                 }
+                break;
+            case AIState.MovingToBed:
+                // 침대로 이동 중 - SleepInBed 코루틴에서 처리
+                break;
+            case AIState.SleepingInBed:
+                // 침대에서 수면 중 - 별도 처리 불필요
                 break;
             case AIState.UsingRoom:
             case AIState.RoomWandering:
@@ -813,6 +904,10 @@ public class AIAgent : MonoBehaviour
     private void TransitionToState(AIState newState)
     {
         CleanupCoroutines();
+        if (currentState == AIState.UsingRoom)
+        {
+            isBeingServed = false;
+        }
 
         currentState = newState;
         currentDestination = GetStateDescription(newState);
@@ -832,6 +927,15 @@ public class AIAgent : MonoBehaviour
                 {
                     agent.SetDestination(roomList[currentRoomIndex].transform.position);
                 }
+                break;
+            case AIState.MovingToBed:
+                if (currentBed != null)
+                {
+                    sleepingCoroutine = StartCoroutine(SleepInBed());
+                }
+                break;
+            case AIState.SleepingInBed:
+                // 침대에서 수면 중 - 별도의 코루틴 불필요
                 break;
             case AIState.ReturningToSpawn:
                 agent.SetDestination(spawnPoint.position);
@@ -859,6 +963,8 @@ public class AIAgent : MonoBehaviour
             AIState.RoomWandering => $"룸 {currentRoomIndex + 1}번 내부 배회 중",
             AIState.ReportingRoomQueue => "사용 완료 보고 대기열로 이동 중",
             AIState.UseWandering => $"룸 {currentRoomIndex + 1}번 사용 중 외부 배회",
+            AIState.MovingToBed => $"룸 {currentRoomIndex + 1}번 침대로 이동 중",
+            AIState.SleepingInBed => $"룸 {currentRoomIndex + 1}번 침대에서 수면 중",
             _ => "알 수 없는 상태"
         };
     }
@@ -1323,6 +1429,190 @@ public class AIAgent : MonoBehaviour
     }
     #endregion
 
+    #region 침대 관련 메서드
+    /// <summary>
+    /// 방 내부의 침대를 찾습니다.
+    /// </summary>
+    private GameObject FindBedInRoom()
+    {
+        if (currentRoomIndex < 0 || currentRoomIndex >= roomList.Count)
+            return null;
+
+        var room = roomList[currentRoomIndex];
+        if (room == null || room.gameObject == null)
+            return null;
+
+        // 방 내부에서 직접 침대 검색
+        var roomBounds = room.bounds;
+        var allFurniture = GameObject.FindObjectsByType<FurnitureID>(FindObjectsSortMode.None);
+        
+        foreach (var furniture in allFurniture)
+        {
+            if (furniture != null && furniture.gameObject != null)
+            {
+                if (roomBounds.Contains(furniture.transform.position))
+                {
+                    // 침대 이름 패턴 매칭 개선
+                    string furnitureName = furniture.gameObject.name.ToLower();
+                    if (furnitureName.Contains("bed") || 
+                        furnitureName.Contains("침대") || 
+                        furnitureName.Contains("bed_") ||
+                        furnitureName.Contains("bed(") ||
+                        furnitureName.Contains("bed("))
+                    {
+                        Debug.Log($"AI {gameObject.name}: 방 {currentRoomIndex + 1}번에서 침대 발견: {furniture.gameObject.name}");
+                        return furniture.gameObject;
+                    }
+                }
+            }
+        }
+
+        // 침대를 찾지 못한 경우 로그 출력
+        Debug.LogWarning($"AI {gameObject.name}: 방 {currentRoomIndex + 1}번에서 침대를 찾을 수 없습니다. 방 경계: {roomBounds}");
+        return null;
+    }
+
+    /// <summary>
+    /// 침대 위로 이동하여 수면을 시작합니다.
+    /// </summary>
+    private IEnumerator SleepInBed()
+    {
+        if (currentBed == null)
+        {
+            Debug.LogError($"AI {gameObject.name}: 침대가 설정되지 않았습니다.");
+            DetermineBehaviorByTime();
+            yield break;
+        }
+
+        Debug.Log($"AI {gameObject.name}: 침대 {currentBed.name}에서 수면 시작");
+
+        // 침대 진입 전 위치와 회전값 저장
+        if (!hasStoredPosition)
+        {
+            positionBeforeBed = transform.position;
+            rotationBeforeBed = transform.rotation;
+            hasStoredPosition = true;
+            Debug.Log($"AI {gameObject.name}: 침대 진입 전 위치 저장 - {positionBeforeBed}");
+        }
+
+        // 침대 위치로 이동
+        bedPosition = currentBed.transform;
+        agent.SetDestination(bedPosition.position);
+
+        // 침대에 도착할 때까지 대기
+        float timeout = 10f;
+        float timer = 0f;
+        
+        while (agent.pathPending || agent.remainingDistance > arrivalDistance)
+        {
+            if (timer >= timeout)
+            {
+                Debug.LogWarning($"AI {gameObject.name}: 침대로 이동 타임아웃");
+                DetermineBehaviorByTime();
+                yield break;
+            }
+            
+            timer += Time.deltaTime;
+            yield return null;
+        }
+
+        // 침대에 도착했으므로 침대의 자식으로 들어가기
+        if (currentBed != null)
+        {
+            // 기존 부모-자식 관계 강제 해제 (Counter 등에서 설정된 것들)
+            if (transform.parent != null)
+            {
+                Debug.Log($"AI {gameObject.name}: 기존 부모 {transform.parent.name}에서 해제");
+                transform.SetParent(null);
+            }
+            
+            // AI를 침대의 자식으로 설정 (worldPositionStays = true로 설정하여 월드 좌표 유지)
+            transform.SetParent(currentBed.transform, true);
+            
+            // 침대 위의 적절한 위치로 이동 (월드 좌표 기준)
+            Vector3 bedTopPosition = currentBed.transform.position + Vector3.up * 0.5f;
+            transform.position = bedTopPosition;
+            
+            // AI의 NavMeshAgent 비활성화 (침대 위에서는 이동하지 않음)
+            if (agent != null)
+            {
+                agent.enabled = false;
+            }
+
+            // 애니메이션 실행 (BedTime Bool 설정)
+            if (animator != null)
+            {
+                animator.SetBool("BedTime", true);
+                animator.SetBool("Moving", false);  // 이동 중지
+                Debug.Log($"AI {gameObject.name}: 수면 애니메이션 (BedTime) 실행.");
+            }
+            else
+            {
+                Debug.LogWarning($"AI {gameObject.name}: Animator 컴포넌트 없음. 애니메이션 스킵.");
+            }
+
+            isSleeping = true;
+            TransitionToState(AIState.SleepingInBed);
+            
+            Debug.Log($"AI {gameObject.name}: 침대 {currentBed.name} 위에서 수면 중, 부모: {transform.parent.name}");
+        }
+    }
+
+    /// <summary>
+    /// 침대에서 일어나 방을 떠납니다.
+    /// </summary>
+    private void WakeUpFromBed()
+    {
+        if (currentBed != null && isSleeping)
+        {
+            Debug.Log($"AI {gameObject.name}: 침대 {currentBed.name}에서 일어남");
+
+            // AI를 침대의 자식에서 해제
+            transform.SetParent(null);
+            
+            // 저장된 위치로 복귀
+            if (hasStoredPosition)
+            {
+                transform.position = positionBeforeBed;
+                transform.rotation = rotationBeforeBed;
+                hasStoredPosition = false;
+                Debug.Log($"AI {gameObject.name}: 저장된 위치로 복귀 - {positionBeforeBed}");
+            }
+            
+            // NavMeshAgent 다시 활성화
+            if (agent != null)
+            {
+                agent.enabled = true;
+            }
+
+            // 애니메이션 끄기 (BedTime Bool false, Moving true)
+            if (animator != null)
+            {
+                animator.SetBool("BedTime", false);
+                animator.SetBool("Moving", true);  // 기본 상태로 복귀
+                Debug.Log($"AI {gameObject.name}: 수면 애니메이션 종료, Moving 상태로 복귀.");
+            }
+
+            isSleeping = false;
+            currentBed = null;
+            bedPosition = null;
+            
+            // 수정된 부분: 9-11시에는 항상 방 사용 완료 보고로 이동
+            if (timeSystem != null && timeSystem.CurrentHour >= 9 && timeSystem.CurrentHour < 11)
+            {
+                Debug.Log($"AI {gameObject.name}: 9시 침대에서 일어나 방 사용 완료 보고로 이동");
+                TransitionToState(AIState.ReportingRoomQueue);
+            }
+            else
+            {
+                DetermineBehaviorByTime();  // 일반 행동 결정
+            }
+            
+            Debug.Log($"AI {gameObject.name}: 침대에서 일어나 다음 행동 시작");
+        }
+    }
+    #endregion
+
     #region 유틸리티 메서드
     private bool TryGetValidPosition(Vector3 center, float radius, int layerMask, out Vector3 result)
     {
@@ -1353,6 +1643,12 @@ public class AIAgent : MonoBehaviour
 
     private void ReturnToPool()
     {
+        if (isSleeping)
+        {
+            Debug.Log($"AI {gameObject.name}: 침대에서 자는 중이므로 풀링 지연 (비활성화하지 않음).");
+            return;  // 자는 AI는 풀링하지 않음
+        }
+
         CleanupCoroutines();
         CleanupResources();
 
@@ -1371,6 +1667,12 @@ public class AIAgent : MonoBehaviour
     #region 정리
     void OnDisable()
     {
+        if (isSleeping)
+        {
+            Debug.Log($"AI {gameObject.name}: 수면 중 비활성화 방지 - 다시 활성화.");
+            gameObject.SetActive(true);  // 강제 활성화
+            return;
+        }
         CleanupCoroutines();
         CleanupResources();
     }
@@ -1403,11 +1705,45 @@ public class AIAgent : MonoBehaviour
             StopCoroutine(useWanderingCoroutine);
             useWanderingCoroutine = null;
         }
+        // 수정된 부분: 수면 코루틴 정리 시 상태도 함께 리셋
+        if (sleepingCoroutine != null)
+        {
+            StopCoroutine(sleepingCoroutine);
+            sleepingCoroutine = null;
+            
+            // 수면 상태가 강제로 종료되는 경우 필요한 정리 작업
+            if (isSleeping && timeSystem != null && timeSystem.CurrentHour >= 9)
+            {
+                Debug.Log($"AI {gameObject.name}: 수면 코루틴 강제 종료, 9시 이후이므로 방 사용 완료 보고로 이동");
+                WakeUpFromBed();
+            }
+        }
     }
 
     private void CleanupResources()
     {
         //Debug.Log($"[AIAgent] {gameObject.name}: CleanupResources 시작");
+        
+        // 침대에서 일어나기
+        if (isSleeping)
+        {
+            WakeUpFromBed();
+        }
+        
+        // 부모-자식 관계 해제
+        if (transform.parent != null)
+        {
+            transform.SetParent(null);
+        }
+        
+        // 저장된 위치로 복귀 (침대 관련이 아닌 경우에도)
+        if (hasStoredPosition)
+        {
+            transform.position = positionBeforeBed;
+            transform.rotation = rotationBeforeBed;
+            hasStoredPosition = false;
+            Debug.Log($"AI {gameObject.name}: 정리 시 저장된 위치로 복귀");
+        }
         
         if (currentRoomIndex != -1)
         {
@@ -1422,6 +1758,7 @@ public class AIAgent : MonoBehaviour
             }
         }
 
+        isBeingServed = false;
         isInQueue = false;
         isWaitingForService = false;
         isScheduledForDespawn = false; // 디스폰 예정 플래그 리셋
@@ -1456,10 +1793,21 @@ public class AIAgent : MonoBehaviour
     {
         currentState = AIState.MovingToQueue;
         currentDestination = "대기열로 이동 중";
+        isBeingServed = false;
         isInQueue = false;
         isWaitingForService = false;
         currentRoomIndex = -1;
         lastBehaviorUpdateHour = -1;
+        
+        // 침대 관련 초기화
+        currentBed = null;
+        bedPosition = null;
+        isSleeping = false;
+        
+        // 위치 저장 관련 초기화
+        hasStoredPosition = false;
+        positionBeforeBed = Vector3.zero;
+        rotationBeforeBed = Quaternion.identity;
 
         if (agent != null)
         {
@@ -1490,6 +1838,19 @@ public class AIAgent : MonoBehaviour
         {
             counterManager.LeaveQueue(this);
         }
+    }
+    #endregion
+
+    #region 방 관련 상태인지 확인합니다.
+    private bool IsInRoomRelatedState()
+    {
+        return (currentState == AIState.UsingRoom || 
+                currentState == AIState.UseWandering || 
+                currentState == AIState.RoomWandering ||
+                currentState == AIState.MovingToRoom ||
+                currentState == AIState.MovingToBed ||
+                currentState == AIState.SleepingInBed) && 
+                currentRoomIndex != -1;
     }
     #endregion
 }

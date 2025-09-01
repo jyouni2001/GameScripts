@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using System.Linq;
+using LodgingSimulator.AI;
 
 namespace JY
 {
@@ -38,6 +39,13 @@ namespace JY
         [Tooltip("방 사용 기록 표시")]
         public bool showUsageLogs = true;
         
+        [Header("집사 AI 연동")]
+        [Tooltip("집사 AI 시스템과 연동 여부")]
+        public bool enableButlerSystem = true;
+        
+        [Tooltip("방 사용 완료 후 자동 청소 작업 추가 여부")]
+        public bool autoAddCleaningTask = true;
+        
         [Header("로그 정보")]
         [Tooltip("사용된 방 정보")]
         [SerializeField] private List<string> usedRoomLogs = new List<string>();
@@ -58,7 +66,7 @@ namespace JY
                 reputationSystem = ReputationSystem.Instance;
                 if (reputationSystem == null)
                 {
-                    reputationSystem = FindFirstObjectByType<ReputationSystem>();
+                    reputationSystem = FindObjectOfType<ReputationSystem>();
                 }
             }
             
@@ -207,6 +215,12 @@ namespace JY
             {
                 DebugLog("PaymentSystem을 찾을 수 없습니다!", true);
             }
+            
+            // 집사 AI 시스템에 청소 작업 추가
+            if (enableButlerSystem && autoAddCleaningTask)
+            {
+                AddCleaningTaskForRoom(room);
+            }
         }
         
         /// <summary>
@@ -257,6 +271,39 @@ namespace JY
         public List<RoomContents> GetAvailableRooms()
         {
             return allRooms.Where(r => !r.IsRoomUsed).ToList();
+        }
+        
+        /// <summary>
+        /// 방에 대한 청소 작업 추가
+        /// </summary>
+        private void AddCleaningTaskForRoom(RoomContents room)
+        {
+            if (room == null || ButlerManager.Instance == null) return;
+            
+            // 방의 중심 위치 계산
+            Vector3 roomCenter = room.GetRoomCenter();
+            
+            // 집사 AI 시스템에 청소 작업 추가
+            ButlerManager.Instance.AddCleaningTask(room.roomID, roomCenter, 1);
+            
+            DebugLog($"방 {room.roomID}에 대한 청소 작업이 추가되었습니다.", true);
+        }
+        
+        /// <summary>
+        /// 방 청소 완료 처리
+        /// </summary>
+        public void OnRoomCleaned(string roomId)
+        {
+            if (string.IsNullOrEmpty(roomId)) return;
+            
+            // 해당 방 찾기
+            RoomContents room = allRooms.Find(r => r.roomID == roomId);
+            if (room != null)
+            {
+                // 방을 다시 사용 가능한 상태로 설정
+                room.ResetRoom();
+                DebugLog($"방 {roomId}이(가) 청소되어 다시 사용 가능한 상태가 되었습니다.", true);
+            }
         }
         
         #region 디버그 메서드

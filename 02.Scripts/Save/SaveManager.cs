@@ -63,6 +63,14 @@ public class SaveManager : MonoBehaviour
         SceneManager.sceneLoaded -= OnSceneLoaded;
     }
 
+    private void Update()
+    {
+        if(Input.GetKeyDown(KeyCode.P)) 
+        {
+            SaveGame();
+        }
+    }
+
     public async void SaveGame()
     {
         SaveData saveData = new SaveData
@@ -218,9 +226,7 @@ public class SaveManager : MonoBehaviour
             ReputationSystem.Instance.SetReputation(loadedSaveData.currentReputation);
 
             if (TimeSystem.Instance == null) throw new System.Exception("TimeSystem.Instance is null");
-            Debug.Log($"저장된 날짜 : {loadedSaveData.currentDay}");
             TimeSystem.Instance.SetDateTime(loadedSaveData.currentDay, (int)(loadedSaveData.currentTime / 3600), (int)((loadedSaveData.currentTime % 3600) / 60));
-            TimeManager.instance.UpdateDayUI(loadedSaveData.currentDay);
 
             PlacementSystem.Instance.UpdateGridBounds();
             PlacementSystem.Instance.ActivatePlanesByLevel(loadedSaveData.currentPurchaseLevel);

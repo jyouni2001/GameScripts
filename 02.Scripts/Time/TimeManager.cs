@@ -1,10 +1,7 @@
-using JY;
-using TMPro;
 using UnityEngine;
-using UnityEngine.Localization;
-using UnityEngine.Localization.Settings;
-using UnityEngine.Rendering.Universal;
 using UnityEngine.UI;
+using TMPro;
+using JY;
 
 namespace JY
 {
@@ -21,35 +18,13 @@ namespace JY
         
         private TimeSystem timeSystem;
 
-        public static TimeManager instance;
-
-        [SerializeField] private LocalizedString dayCounterLocalizedString;
-        #endregion
-
-        #region Static Initialization
-        
-        /// <summary>
-        /// Static 필드 초기화
-        /// </summary>
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void InitializeStatics()
-        {
-            instance = null;
-        }
-        
         #endregion
 
         #region Unity Lifecycle Methods
-
-        private void Awake()
+        
+        private void Start()
         {
-            Debug.Log("TimeManager 초기화 시작");
             InitializeTimeSystem();
-
-            if(instance == null)
-            {
-                instance = this;
-            }
         }
         
         private void OnDestroy()
@@ -115,18 +90,20 @@ namespace JY
                 timeText.text = string.Format("{0:00}:{1:00}", hour, minute);
             }
         }
+        
 
-
-
+        
         /// <summary>
         /// 일차 UI 업데이트
         /// </summary>
-        public void UpdateDayUI(int newDay)
+        private void UpdateDayUI(int newDay)
         {
-            string localizedString = LocalizationSettings.StringDatabase.GetLocalizedString("Locales", "Ingame_DayCounter", new object[] { newDay });
-            dayText.text = localizedString;
-            Debug.Log(localizedString);
+            if (dayText != null)
+            {
+                dayText.text = $"{newDay}일차";
+            }
         }
+
         #endregion
     }
 }

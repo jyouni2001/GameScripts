@@ -1,4 +1,4 @@
-using System;
+using UnityEditor.UIElements;
 using UnityEngine;
 
 public class PlayerWallet : MonoBehaviour
@@ -6,7 +6,6 @@ public class PlayerWallet : MonoBehaviour
     public static PlayerWallet Instance { get; set; }
     
     public int money = 1000;
-    public event Action<int> OnMoneyChanged; // 돈이 변경될 때 발동할 이벤트
 
     void Awake()
     {
@@ -22,7 +21,6 @@ public class PlayerWallet : MonoBehaviour
     public void AddMoney(int amount)
     {
         money += amount;
-        OnMoneyChanged?.Invoke(money); // 돈이 추가될 때 이벤트 발생
     }
 
     public void SpendMoney(int amount)
@@ -30,7 +28,6 @@ public class PlayerWallet : MonoBehaviour
         if (money >= amount)
         {
             money -= amount;
-            OnMoneyChanged?.Invoke(money); // 돈이 감소될 때 이벤트 발생
         }
     }
 }

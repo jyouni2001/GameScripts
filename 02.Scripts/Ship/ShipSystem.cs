@@ -18,6 +18,7 @@ namespace JY
         
         [Header("시간 설정")]
         [SerializeField] private float spawnTimeBeforeArrival = 5f; // 도착 5분 전 스폰 (분)
+        [SerializeField] private float dockingDuration = 30f; // 정박 시간 (분)
         
         [Header("루트 설정")]
         [SerializeField] private List<ShipRoute> shipRoutes = new List<ShipRoute>();
@@ -43,6 +44,8 @@ namespace JY
         
         // 이벤트
         public event Action<ShipController> OnShipSpawned;
+        public event Action<ShipController> OnShipDocked;
+        public event Action<ShipController> OnShipDeparted;
         
         private void Awake()
         {
@@ -86,7 +89,7 @@ namespace JY
         private void SetupTimeSystemConnection()
         {
             // TimeSystem 찾기
-            timeSystem = FindFirstObjectByType<TimeSystem>();
+            timeSystem = FindObjectOfType<TimeSystem>();
             if (timeSystem == null)
             {
                 DebugLog("TimeSystem을 찾을 수 없습니다!", true);
@@ -103,7 +106,7 @@ namespace JY
         private void SetupAISpawnerConnection()
         {
             // AISpawner 찾기
-            aiSpawner = FindFirstObjectByType<AISpawner>();
+            aiSpawner = FindObjectOfType<AISpawner>();
             if (aiSpawner == null)
             {
                 DebugLog("AISpawner를 찾을 수 없습니다!", true);
@@ -397,6 +400,8 @@ namespace JY
         {
             // 이벤트 정리
             OnShipSpawned = null;
+            OnShipDocked = null;
+            OnShipDeparted = null;
         }
     }
     

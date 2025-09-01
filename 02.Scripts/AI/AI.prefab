@@ -14,6 +14,7 @@ GameObject:
   - component: {fileID: 5036531007662480836}
   - component: {fileID: -2368006562919127881}
   - component: {fileID: -5106405700107920298}
+  - component: {fileID: -1874523304894672811}
   m_Layer: 0
   m_Name: AI
   m_TagString: Untagged
@@ -123,6 +124,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   counterManager: {fileID: 0}
+  debugUIEnabled: 1
 --- !u!195 &-5106405700107920298
 NavMeshAgent:
   m_ObjectHideFlags: 0
@@ -145,3 +147,25 @@ NavMeshAgent:
   m_BaseOffset: 0.5
   m_WalkableMask: 4294967295
   m_ObstacleAvoidanceType: 4
+--- !u!95 &-1874523304894672811
+Animator:
+  serializedVersion: 7
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7244969928479265881}
+  m_Enabled: 1
+  m_Avatar: {fileID: 0}
+  m_Controller: {fileID: 9100000, guid: d885b590c613d47429358eeb78f33fb2, type: 2}
+  m_CullingMode: 0
+  m_UpdateMode: 0
+  m_ApplyRootMotion: 0
+  m_LinearVelocityBlending: 0
+  m_StabilizeFeet: 0
+  m_AnimatePhysics: 0
+  m_WarningMessage: 
+  m_HasTransformHierarchy: 1
+  m_AllowConstantClipSamplingOptimization: 1
+  m_KeepAnimatorStateOnDisable: 0
+  m_WriteDefaultValuesOnDisable: 0
