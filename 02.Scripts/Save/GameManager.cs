@@ -27,8 +27,8 @@ public class GameManager : MonoBehaviour
         timeSinceLastSave += Time.deltaTime;
         if (timeSinceLastSave >= autoSaveInterval)
         {
-            SaveManager.Instance.SaveGame();
             timeSinceLastSave = 0f;
+            SaveGame();
             Debug.Log("자동 저장 완료");
         }
     }

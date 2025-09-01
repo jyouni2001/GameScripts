@@ -1,7 +1,8 @@
 using System;
 using UnityEngine;
 using UnityEngine.EventSystems;
-using DG.Tweening; // DOTween 사용을 위해 추가
+using DG.Tweening;
+using UnityEngine.UI; // DOTween 사용을 위해 추가
 
 public class InputManager : MonoBehaviour
 {
@@ -25,7 +26,13 @@ public class InputManager : MonoBehaviour
     [SerializeField] private LayerMask batchedLayer;
     [SerializeField] private LayerMask objectLayer;
     public event Action OnClicked, OnExit;
-    public GameObject   BuildUI;
+
+    public GameObject BuildUI;
+    public GameObject SettingUI;
+    public GameObject SettingUI2;
+    public GameObject QuestUI;
+    public Button     SettingBtn;
+
     public RaycastHit   hit;
     public RaycastHit   hit2; 
     public bool         isBuildMode = false;
@@ -35,6 +42,8 @@ public class InputManager : MonoBehaviour
     private void Start()
     {
         InitialBuildUI();
+
+        SettingBtn.onClick.AddListener(OnOffSettingUI);
     }
     
     private void Update()
@@ -56,7 +65,14 @@ public class InputManager : MonoBehaviour
 
             ChangeFloorForBuildMode();
         }
-        
+
+        if (Input.GetKeyDown(KeyCode.Q)) QuestUI.SetActive(!QuestUI.activeSelf);
+
+        if(Input.GetKeyDown(KeyCode.Escape))
+        {
+            OnOffSettingUI();
+        }
+
         // 마우스 우클릭으로 건설 중지
         if (Input.GetMouseButtonDown(1) && isBuildMode && !IsPointerOverUI())
         {
@@ -94,6 +110,12 @@ public class InputManager : MonoBehaviour
         {
             HandleObjectSelection();
         }
+    }
+
+    private void OnOffSettingUI()
+    {
+        SettingUI.SetActive(!SettingUI.activeSelf);
+        if(SettingUI2.activeSelf) SettingUI2.SetActive(false);
     }
 
     private void HandleObjectSelection()
@@ -173,6 +195,8 @@ public class InputManager : MonoBehaviour
         {
             Debug.LogError("BuildUI가 할당되지 않았습니다!");
         }
+
+        if(SettingUI is not null) SettingUI.SetActive(false);
     }
 
 
@@ -267,13 +291,10 @@ public class InputManager : MonoBehaviour
         {
             // 클릭한 오브젝트의 루트 오브젝트 반환
             GameObject clickedObject = hit2.collider.gameObject;
-            Debug.Log($"선택된 오브젝트 : {clickedObject}");
+            //Debug.Log($"선택된 오브젝트 : {clickedObject}");
             return clickedObject.transform.root.gameObject;
         }
-        else
-        {
-            Debug.Log("레이 작동 안하는 중");
-        }
+
         return null;
     }
 

@@ -50,7 +50,7 @@ namespace JY
         public string CurrentTimeString { get; private set; }
         
         // 날짜 관련 속성들
-        public int CurrentDay { get; private set; }
+        public int CurrentDay { get; set; }
         public string CurrentDateString { get; private set; }
 
         // 싱글톤 인스턴스
@@ -68,11 +68,6 @@ namespace JY
 
         
         /// <summary>
-        /// 특정 시간 이벤트 델리게이트
-        /// </summary>
-        public delegate void TimeEventHandler(float eventTime);
-        
-        /// <summary>
         /// 일차 변경 이벤트 델리게이트
         /// </summary>
         public delegate void DayChangeHandler(int newDay);
@@ -80,12 +75,20 @@ namespace JY
         // 이벤트 선언
         public event TimeChangeHandler OnHourChanged;
         public event TimeChangeHandler OnMinuteChanged; 
-        public event TimeEventHandler OnTimeEvent;
         public event DayChangeHandler OnDayChanged;
 
         #endregion
 
         #region Singleton Implementation
+        
+        /// <summary>
+        /// Static 필드 초기화
+        /// </summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void InitializeStatics()
+        {
+            _instance = null;
+        }
         
         /// <summary>
         /// 싱글톤 인스턴스 접근자
@@ -96,7 +99,7 @@ namespace JY
             {
                 if (_instance == null)
                 {
-                    _instance = FindObjectOfType<TimeSystem>();
+                    _instance = FindFirstObjectByType<TimeSystem>();
                     if (_instance == null)
                     {
                         GameObject obj = new GameObject("TimeSystem");
@@ -113,6 +116,7 @@ namespace JY
         
         private void Awake()
         {
+            Debug.Log("TimeSystem 초기화 시작");
             InitializeSingleton();
         }
         
@@ -241,7 +245,7 @@ namespace JY
         /// </summary>
         /// <param name="day">설정할 일차 (1 이상)</param>
         public void SetDay(int day)
-        {
+        {            
             currentDay = Mathf.Max(1, day);
             CurrentDay = currentDay;
             UpdateTimeValues();
@@ -256,6 +260,7 @@ namespace JY
         /// <param name="minute">분 (0-59)</param>
         public void SetDateTime(int day, int hour, int minute = 0)
         {
+            Debug.Log($"현재 상태 = {day}");
             currentDay = Mathf.Max(1, day);
             CurrentDay = currentDay;
             currentTime = (hour * 3600f) + (minute * 60f);

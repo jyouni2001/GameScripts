@@ -16,7 +16,6 @@ namespace JY
         [Header("이동 설정")]
         [SerializeField] private float currentSpeed = 0f;
         [SerializeField] private int currentWaypointIndex = 0;
-        [SerializeField] private float waypointReachDistance = 2f;
         [SerializeField] private bool hasCompletedRoute = false;
         
         [Header("디버그 설정")]

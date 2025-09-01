@@ -1,6 +1,7 @@
-using UnityEngine;
-using TMPro;
+using System;
 using System.Collections.Generic;
+using TMPro;
+using UnityEngine;
 
 namespace JY
 {
@@ -17,7 +18,7 @@ namespace JY
         [Header("UI 설정")]
         [Tooltip("명성도를 표시할 UI 텍스트 컴포넌트")]
         [SerializeField] private TextMeshProUGUI reputationText; // 인스펙터에서 할당
-        
+        [SerializeField] private TextMeshProUGUI currentGradeText;
         [Tooltip("UI 텍스트 형식")]
         [SerializeField] private string textFormat = "Grade: {0} {1}"; // {0}: 명성도, {1}: 등급
         
@@ -48,6 +49,9 @@ namespace JY
         // 공개 속성
         public int CurrentReputation => currentReputation;
         public string CurrentGrade => GetCurrentGrade();
+
+        // 명성도 변경 시 이벤트 추가
+        public event Action<int> OnReputationChanged;
 
         // 캐싱 변수 (성능 최적화)
         private int lastReputation = -1; // 마지막으로 표시된 명성도
@@ -114,6 +118,7 @@ namespace JY
             }
             
             UpdateUI();
+            OnReputationChanged?.Invoke(currentReputation);
         }
         
         /// <summary>
@@ -157,6 +162,7 @@ namespace JY
             }
             
             UpdateUI();
+            OnReputationChanged?.Invoke(currentReputation);
         }
         
         /// <summary>
@@ -179,6 +185,7 @@ namespace JY
             }
             
             UpdateUI();
+            OnReputationChanged?.Invoke(currentReputation);
         }
         
         /// <summary>
@@ -241,6 +248,7 @@ namespace JY
                 }
 
                 string grade = GetCurrentGrade();
+                currentGradeText.text = grade;
                 reputationText.text = string.Format(textFormat, lastFormattedReputation, grade);
             }
         }

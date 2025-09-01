@@ -68,7 +68,7 @@ namespace JY
             reputationSystem = ReputationSystem.Instance;
             if (reputationSystem == null)
             {
-                reputationSystem = FindObjectOfType<ReputationSystem>();
+                reputationSystem = FindFirstObjectByType<ReputationSystem>();
             }
             
             DebugLog("결제 시스템 초기화 완료", true);

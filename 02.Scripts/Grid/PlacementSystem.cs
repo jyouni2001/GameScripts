@@ -12,7 +12,6 @@ public class PlacementSystem : MonoBehaviour
     [SerializeField] private InputManager inputManager;
     [SerializeField] private ObjectPlacer objectPlacer;
     [SerializeField] private GameObject previewObject;
-    [SerializeField] private SpawnEffect spawnEffect;
     [SerializeField] private ChangeFloorSystem changeFloorSystem;
     private GridData selectedData; 
     
@@ -421,11 +420,6 @@ public class PlacementSystem : MonoBehaviour
         int index = objectPlacer.PlaceObject(database.objectsData[selectedObjectIndex].Prefab, worldPosition, previewRotation);
         
         PlayerWallet.Instance.SpendMoney(database.objectsData[selectedObjectIndex].BuildPrice);
-
-        //Debug.Log($"오브젝트 배치 좌표 : {worldPosition}");
-    
-        spawnEffect.OnBuildingPlaced(worldPosition);
-
 
         selectedData = GetSelectedGridData();
 
@@ -1046,9 +1040,6 @@ public class PlacementSystem : MonoBehaviour
                 PlayerWallet.Instance.SpendMoney(database.objectsData[selectedObjectIndex].BuildPrice);
                 selectedData.AddObjectAt(currentPos, objectSize, database.objectsData[selectedObjectIndex].ID, index, 
                 database.objectsData[selectedObjectIndex].kindIndex, previewRotation, grid, isWall);
-
-                // 연기 이펙트 생성
-                spawnEffect.OnBuildingPlaced(worldPosition);
             }
             currentPos += stepDirection;
         }
@@ -1204,7 +1195,6 @@ public class PlacementSystem : MonoBehaviour
             // ObjectPlacer에서 오브젝트 제거
             objectPlacer.RemoveObject(objectIndex);
             PlayerWallet.Instance.AddMoney(objectData.BuildPrice);
-            spawnEffect.OnBuildingPlaced(mouseIndicator.transform.position);
             Debug.Log($"오브젝트 삭제 완료: 인덱스 {objectIndex}");
         }
         else

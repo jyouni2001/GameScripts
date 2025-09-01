@@ -182,8 +182,8 @@ namespace JY
         /// </summary>
         private void InitializeComponents()
         {
-            placementSystem = placementSystem ?? FindObjectOfType<PlacementSystem>();
-            grid = grid ?? FindObjectOfType<Grid>();
+            placementSystem = placementSystem ?? FindFirstObjectByType<PlacementSystem>();
+            grid = grid ?? FindFirstObjectByType<Grid>();
 
             if (placementSystem == null || grid == null)
             {
@@ -2283,7 +2283,7 @@ namespace JY
             room.gameObject.tag = "Room";
 
             // RoomManager를 통해 방 등록 (Sunbed 방 설정 포함)
-            RoomManager roomManager = FindObjectOfType<RoomManager>();
+            RoomManager roomManager = FindFirstObjectByType<RoomManager>();
             if (roomManager != null)
             {
                 roomManager.RegisterRoomFromDetector(room, room.gameObject);

@@ -319,3 +319,66 @@ MonoBehaviour:
     <BuildPrice>k__BackingField: 30
     <BasePrice>k__BackingField: 30
     <ReputationValue>k__BackingField: 1
+  - <Name>k__BackingField: Tree_0
+    <ID>k__BackingField: 34
+    <kindIndex>k__BackingField: 3
+    IsWall: 0
+    <Size>k__BackingField: {x: 1, y: 1}
+    <Prefab>k__BackingField: {fileID: 7373098772822066557, guid: b457170254a90ab459b1db3edc1a1501, type: 3}
+    <BuildPrice>k__BackingField: 50
+    <BasePrice>k__BackingField: 0
+    <ReputationValue>k__BackingField: 0
+  - <Name>k__BackingField: Grass_0
+    <ID>k__BackingField: 35
+    <kindIndex>k__BackingField: 3
+    IsWall: 0
+    <Size>k__BackingField: {x: 1, y: 1}
+    <Prefab>k__BackingField: {fileID: 1927415254392634827, guid: 42579afa0685b99429b931c8f6e2d5fa, type: 3}
+    <BuildPrice>k__BackingField: 50
+    <BasePrice>k__BackingField: 0
+    <ReputationValue>k__BackingField: 1
+  - <Name>k__BackingField: Grass_1
+    <ID>k__BackingField: 36
+    <kindIndex>k__BackingField: 3
+    IsWall: 0
+    <Size>k__BackingField: {x: 1, y: 1}
+    <Prefab>k__BackingField: {fileID: 298301741064601351, guid: 1821f07912544f64c9157d6fc89b05c3, type: 3}
+    <BuildPrice>k__BackingField: 50
+    <BasePrice>k__BackingField: 0
+    <ReputationValue>k__BackingField: 0
+  - <Name>k__BackingField: Grass_2
+    <ID>k__BackingField: 37
+    <kindIndex>k__BackingField: 3
+    IsWall: 0
+    <Size>k__BackingField: {x: 1, y: 2}
+    <Prefab>k__BackingField: {fileID: 6482593280891767022, guid: 3787f8d3bab62104993482170e6e3c32, type: 3}
+    <BuildPrice>k__BackingField: 50
+    <BasePrice>k__BackingField: 0
+    <ReputationValue>k__BackingField: 1
+  - <Name>k__BackingField: Grass_3
+    <ID>k__BackingField: 38
+    <kindIndex>k__BackingField: 3
+    IsWall: 0
+    <Size>k__BackingField: {x: 1, y: 1}
+    <Prefab>k__BackingField: {fileID: 6079154083348076291, guid: a18dae298eee9bd4c9c208afcf69be39, type: 3}
+    <BuildPrice>k__BackingField: 50
+    <BasePrice>k__BackingField: 0
+    <ReputationValue>k__BackingField: 1
+  - <Name>k__BackingField: Grass_4
+    <ID>k__BackingField: 39
+    <kindIndex>k__BackingField: 3
+    IsWall: 0
+    <Size>k__BackingField: {x: 1, y: 1}
+    <Prefab>k__BackingField: {fileID: 7634813878254618808, guid: fbba05b5e18a45b42b93c4d81b26d89c, type: 3}
+    <BuildPrice>k__BackingField: 50
+    <BasePrice>k__BackingField: 0
+    <ReputationValue>k__BackingField: 1
+  - <Name>k__BackingField: Grass_5
+    <ID>k__BackingField: 40
+    <kindIndex>k__BackingField: 3
+    IsWall: 0
+    <Size>k__BackingField: {x: 1, y: 1}
+    <Prefab>k__BackingField: {fileID: 7953202316261831178, guid: 20a57319244c2f04887cd08126140255, type: 3}
+    <BuildPrice>k__BackingField: 50
+    <BasePrice>k__BackingField: 0
+    <ReputationValue>k__BackingField: 1

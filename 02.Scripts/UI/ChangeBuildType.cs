@@ -21,6 +21,11 @@ public class ChangeBuildType : MonoBehaviour
 
     [SerializeField] private BuildPanel[] buildPanels; // 건축물 패널
 
+    private void Start()
+    {
+        ChangeBuildTypeButton(0);
+    }
+
     /// <summary>
     /// 모든 패널을 비활성화
     /// </summary>
