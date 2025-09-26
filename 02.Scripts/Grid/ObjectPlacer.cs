@@ -108,6 +108,17 @@ public class ObjectPlacer : MonoBehaviour
             placedGameObjects[index] = newObject;
         }
 
+        // 주방 감지기에게 실제 배치된 오브젝트 알림
+        if (JY.KitchenDetector.Instance != null)
+        {
+            Debug.Log($"✅ KitchenDetector 인스턴스 발견! 배치 알림 전송: {newObject.name}");
+            JY.KitchenDetector.Instance.OnFurnitureePlaced(newObject, position);
+        }
+        else
+        {
+            Debug.Log("❌ KitchenDetector.Instance가 null입니다! 씬에 KitchenDetector가 있는지 확인하세요.");
+        }
+
         navMeshBaker?.RebuildNavMesh();
         return index;
     }
@@ -139,6 +150,13 @@ public class ObjectPlacer : MonoBehaviour
                 // 애니메이션 완료 후 실행될 콜백 추가
                 sequence.OnComplete(() =>
                 {
+                    // 주방 감지기에게 가구 제거 알림
+                    if (JY.KitchenDetector.Instance != null)
+                    {
+                        Vector3 objectPosition = obj.transform.position;
+                        JY.KitchenDetector.Instance.OnFurnitureRemoved(obj, objectPosition);
+                    }
+                    
                     // GameObject 파괴
                     Destroy(obj);
                     // 효과 재생

@@ -19,24 +19,12 @@ namespace JY
         [SerializeField] private TextMeshProUGUI timeText;
         [SerializeField] private TextMeshProUGUI dayText;
         
+        
         private TimeSystem timeSystem;
 
         public static TimeManager instance;
 
         [SerializeField] private LocalizedString dayCounterLocalizedString;
-        #endregion
-
-        #region Static Initialization
-        
-        /// <summary>
-        /// Static 필드 초기화
-        /// </summary>
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void InitializeStatics()
-        {
-            instance = null;
-        }
-        
         #endregion
 
         #region Unity Lifecycle Methods
@@ -127,6 +115,8 @@ namespace JY
             dayText.text = localizedString;
             Debug.Log(localizedString);
         }
+
+        
         #endregion
     }
 }

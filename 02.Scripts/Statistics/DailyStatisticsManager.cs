@@ -47,10 +47,12 @@ public class DailyStatisticsManager : MonoBehaviour
     private int currentReputation;
     private int currentGold;
     private int totalVisitorsToday;
+    private int currentActiveVisitors; // 현재 활성 방문객 수
     
     // 시작 값 저장
     private int startingReputation;
     private int startingGold;
+    private int lastActiveVisitorCount; // 이전 활성 방문객 수 (차이 계산용)
     
     // 코루틴 참조
     private Coroutine saveCoroutine;
@@ -102,6 +104,8 @@ public class DailyStatisticsManager : MonoBehaviour
             startingReputation = currentReputation;
             startingGold = currentGold;
             totalVisitorsToday = 0;
+            currentActiveVisitors = 0;
+            lastActiveVisitorCount = 0;
             DebugLog($"현재 날 통계 초기화: {currentDay}일차", true);
         }
         
@@ -173,8 +177,10 @@ public class DailyStatisticsManager : MonoBehaviour
         currentReputation = 0;
         currentGold = 0;
         totalVisitorsToday = 0;
+        currentActiveVisitors = 0;
         startingReputation = 0;
         startingGold = 0;
+        lastActiveVisitorCount = 0;
     }
     
     /// <summary>
@@ -258,16 +264,15 @@ public class DailyStatisticsManager : MonoBehaviour
     {
         while (enableDataCollection)
         {
-            // 현재 값 업데이트
+            // 현재 값 업데이트 (실시간)
             UpdateCurrentValues();
             
-            // 24시간마다 데이터 기록 (11시 정각에)
-            if (JY.TimeSystem.Instance != null && JY.TimeSystem.Instance.CurrentHour == 11 && JY.TimeSystem.Instance.CurrentMinute == 0)
-            {
-                RecordDailyData();
-            }
+            // 방문객 수 변화 감지 및 총 방문객 수 업데이트
+            UpdateVisitorCount();
             
-            yield return new WaitForSeconds(60f); // 1분마다 체크
+            // 0시 정각에 일차 변경 체크 (TimeSystem에서 자동으로 OnDayChanged 호출)
+            
+            yield return new WaitForSeconds(5f); // 5초마다 체크 (실시간 업데이트)
         }
     }
     
@@ -288,11 +293,46 @@ public class DailyStatisticsManager : MonoBehaviour
             currentGold = PlayerWallet.Instance.money;
         }
         
-        // 방문객 수는 OnVisitorSpawned()로만 추적하므로 여기서는 제거
+        // AISpawner에서 현재 활성 방문객 수 가져오기
+        if (JY.AISpawner.Instance != null)
+        {
+            currentActiveVisitors = JY.AISpawner.Instance.GetActiveAICount();
+        }
     }
     
     /// <summary>
-    /// 일차별 데이터 기록 (24시간마다)
+    /// 방문객 수 변화 감지 및 총 방문객 수 업데이트
+    /// </summary>
+    private void UpdateVisitorCount()
+    {
+        // 현재 활성 방문객 수와 이전 수를 비교
+        int visitorDifference = currentActiveVisitors - lastActiveVisitorCount;
+        
+        if (visitorDifference > 0)
+        {
+            // 방문객이 증가한 경우, 차이만큼 하루 총 방문객 수에 추가
+            totalVisitorsToday += visitorDifference;
+            
+            // DailyStatisticsData의 totalVisitors도 업데이트
+            if (currentDayStatistics != null)
+            {
+                currentDayStatistics.totalVisitors = totalVisitorsToday;
+            }
+            
+            DebugLog($"방문객 수 증가: +{visitorDifference}명 (총: {totalVisitorsToday}명)", true);
+        }
+        else if (visitorDifference < 0)
+        {
+            // 방문객이 감소한 경우 (퇴장), 총 방문객 수는 그대로 유지
+            DebugLog($"방문객 수 감소: {visitorDifference}명 (총 방문객 수는 유지: {totalVisitorsToday}명)", true);
+        }
+        
+        // 이전 값 업데이트
+        lastActiveVisitorCount = currentActiveVisitors;
+    }
+    
+    /// <summary>
+    /// 일차별 데이터 기록 (일차 변경 시)
     /// </summary>
     private void RecordDailyData()
     {
@@ -301,7 +341,7 @@ public class DailyStatisticsManager : MonoBehaviour
         // 현재 값들을 먼저 업데이트
         UpdateCurrentValues();
         
-        int currentDay = JY.TimeSystem.Instance.CurrentDay;
+        int currentDay = currentDayStatistics.day; // 현재 통계의 일차 사용
         
         // 하루 동안 획득한 양 계산
         int reputationGained = currentReputation - startingReputation;
@@ -337,7 +377,7 @@ public class DailyStatisticsManager : MonoBehaviour
     #region Event Handlers
     
     /// <summary>
-    /// 날짜 변경 이벤트 핸들러
+    /// 날짜 변경 이벤트 핸들러 (0시에 호출됨)
     /// </summary>
     private void OnDayChanged(int newDay)
     {
@@ -345,8 +385,17 @@ public class DailyStatisticsManager : MonoBehaviour
         
         int currentDay = newDay;
         
+        DebugLog($"=== 0시 일차 변경 감지: {currentDay}일차 시작 ===", true);
+        
         // 현재 값들을 먼저 업데이트
         UpdateCurrentValues();
+        
+        // 이전 일차의 데이터가 있다면 먼저 기록
+        if (currentDayStatistics != null && currentDayStatistics.day < currentDay)
+        {
+            RecordDailyData();
+            DebugLog($"이전 일차 데이터 기록 완료: {currentDayStatistics.day}일차", true);
+        }
         
         // 새 날의 통계 시작
         currentDayStatistics = statisticsContainer.GetOrCreateDailyStatistics(currentDay);
@@ -355,11 +404,13 @@ public class DailyStatisticsManager : MonoBehaviour
         startingReputation = currentReputation;
         startingGold = currentGold;
         totalVisitorsToday = 0;
+        currentActiveVisitors = 0;
+        lastActiveVisitorCount = 0;
         
         currentDayStatistics.startingReputation = startingReputation;
         currentDayStatistics.startingGold = startingGold;
         
-        DebugLog($"새 날 시작: {currentDay}일차", true);
+        DebugLog($"새 날 시작: {currentDay}일차 (0시)", true);
         DebugLog($"시작값 설정 - Rep:{startingReputation}, Gold:{startingGold}", true);
         OnDayReset?.Invoke();
     }
@@ -373,12 +424,7 @@ public class DailyStatisticsManager : MonoBehaviour
         
         int currentHour = hour;
         
-        // 11시 정각에 하루 통계 초기화
-        if (currentHour == 11 && minute == 0)
-        {
-            OnDayChanged(JY.TimeSystem.Instance.CurrentDay);
-        }
-        
+        // 시간 변경은 단순히 로그만 출력 (일차 변경은 OnDayChanged에서 처리)
         DebugLog($"시간 변경: {currentHour}시 {minute}분", showImportantLogsOnly);
     }
     
@@ -429,20 +475,37 @@ public class DailyStatisticsManager : MonoBehaviour
             DebugLog($"OnVisitorSpawned에서 통계 초기화: {currentDay}일차", true);
         }
         
-        int beforeCount = totalVisitorsToday;
-        totalVisitorsToday++;
-        DebugLog($"방문객 스폰: {beforeCount} → {totalVisitorsToday}명 (하루 총 방문객 수)", true);
-        
-        // 현재 활성 AI 수도 함께 로그
+        // 현재 활성 AI 수 업데이트
         if (JY.AISpawner.Instance != null)
         {
-            int activeCount = JY.AISpawner.Instance.GetActiveAICount();
-            DebugLog($"현재 활성 AI 수: {activeCount}명", true);
+            int newActiveCount = JY.AISpawner.Instance.GetActiveAICount();
+            DebugLog($"방문객 스폰 전 활성 AI 수: {currentActiveVisitors}명", true);
+            DebugLog($"방문객 스폰 후 활성 AI 수: {newActiveCount}명", true);
+            
+            // 방문객이 실제로 증가했는지 확인하고 총 방문객 수 증가
+            if (newActiveCount > currentActiveVisitors)
+            {
+                int increase = newActiveCount - currentActiveVisitors;
+                totalVisitorsToday += increase;
+                
+                // DailyStatisticsData의 totalVisitors도 업데이트
+                if (currentDayStatistics != null)
+                {
+                    currentDayStatistics.totalVisitors = totalVisitorsToday;
+                }
+                
+                DebugLog($"방문객 수 증가 감지: +{increase}명 (총: {totalVisitorsToday}명)", true);
+            }
+            
+            currentActiveVisitors = newActiveCount;
+            lastActiveVisitorCount = currentActiveVisitors;
         }
         else
         {
             DebugLog("AISpawner 인스턴스를 찾을 수 없습니다!", true);
         }
+        
+        DebugLog("방문객 스폰 이벤트 처리 완료", true);
     }
     
     #endregion
@@ -609,13 +672,25 @@ public class DailyStatisticsManager : MonoBehaviour
     public void TestVisitorSpawn()
     {
         DebugLog("=== 방문객 스폰 테스트 시작 ===", true);
-        DebugLog($"테스트 전 방문객 수: {totalVisitorsToday}명", true);
+        DebugLog($"테스트 전 총 방문객 수: {totalVisitorsToday}명", true);
+        DebugLog($"테스트 전 활성 방문객 수: {currentActiveVisitors}명", true);
         DebugLog($"데이터 수집 활성화: {enableDataCollection}", true);
         DebugLog($"현재 일차 통계: {(currentDayStatistics != null ? "존재" : "null")}", true);
         
+        // AISpawner가 있는지 확인
+        if (JY.AISpawner.Instance != null)
+        {
+            DebugLog($"AISpawner 현재 활성 AI 수: {JY.AISpawner.Instance.GetActiveAICount()}명", true);
+        }
+        else
+        {
+            DebugLog("AISpawner 인스턴스가 null입니다!", true);
+        }
+        
         OnVisitorSpawned();
         
-        DebugLog($"테스트 후 방문객 수: {totalVisitorsToday}명", true);
+        DebugLog($"테스트 후 총 방문객 수: {totalVisitorsToday}명", true);
+        DebugLog($"테스트 후 활성 방문객 수: {currentActiveVisitors}명", true);
         DebugLog("=== 방문객 스폰 테스트 완료 ===", true);
     }
     
@@ -628,6 +703,7 @@ public class DailyStatisticsManager : MonoBehaviour
         DebugLog($"데이터 수집 활성화: {enableDataCollection}", true);
         DebugLog($"현재 명성도: {currentReputation}", true);
         DebugLog($"현재 골드: {currentGold}", true);
+        DebugLog($"현재 활성 방문객 수: {currentActiveVisitors}", true);
         DebugLog($"하루 총 방문객 수: {totalVisitorsToday}", true);
         DebugLog($"시작 명성도: {startingReputation}", true);
         DebugLog($"시작 골드: {startingGold}", true);
@@ -641,6 +717,23 @@ public class DailyStatisticsManager : MonoBehaviour
     public int GetTotalVisitorsToday()
     {
         return totalVisitorsToday;
+    }
+    
+    /// <summary>
+    /// 현재 활성 방문객 수 반환 (UI용)
+    /// </summary>
+    public int GetCurrentActiveVisitors()
+    {
+        return currentActiveVisitors;
+    }
+    
+    /// <summary>
+    /// 수동으로 방문객 수 증가 (디버그/테스트용)
+    /// </summary>
+    public void IncrementVisitorCount(int count = 1)
+    {
+        totalVisitorsToday += count;
+        DebugLog($"수동으로 방문객 수 증가: +{count}명 (총: {totalVisitorsToday}명)", true);
     }
     
     #endregion

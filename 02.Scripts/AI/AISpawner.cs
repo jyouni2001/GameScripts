@@ -209,6 +209,9 @@ namespace JY
             }
             
             DebugLog($"{ai.name} 활성화됨 (현재 활성화된 AI: {activeAIs.Count}개)", true);
+            
+            // UI 업데이트 알림
+            NotifyAICountChanged();
         }
 
         /// <summary>
@@ -224,6 +227,9 @@ namespace JY
             ai.transform.position = transform.position;
             
             DebugLog($"{ai.name} 풀로 반환됨 (현재 활성화된 AI: {activeAIs.Count}개)");
+            
+            // UI 업데이트 알림
+            NotifyAICountChanged();
         }
 
         /// <summary>
@@ -252,6 +258,19 @@ namespace JY
             
             StartCoroutine(SpawnMultipleAIs(count));
             DebugLog($"수동 스폰: {count}명의 AI", true);
+        }
+        
+        /// <summary>
+        /// AI 수 변경 시 UI 업데이트 알림
+        /// </summary>
+        private void NotifyAICountChanged()
+        {
+            // RealTimeAICounterUI 찾기 및 업데이트
+            var aiCounterUI = FindFirstObjectByType<RealTimeAICounterUI>();
+            if (aiCounterUI != null)
+            {
+                aiCounterUI.OnAICountChanged();
+            }
         }
         
         /// <summary>

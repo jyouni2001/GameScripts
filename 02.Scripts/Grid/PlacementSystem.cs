@@ -420,6 +420,15 @@ public class PlacementSystem : MonoBehaviour
         int index = objectPlacer.PlaceObject(database.objectsData[selectedObjectIndex].Prefab, worldPosition, previewRotation);
         
         PlayerWallet.Instance.SpendMoney(database.objectsData[selectedObjectIndex].BuildPrice);
+        
+        // 작업 위치 관리자에게 새 가구 배치 알림
+        if (JY.WorkPositionManager.Instance != null)
+        {
+            GameObject placedObject = database.objectsData[selectedObjectIndex].Prefab;
+            JY.WorkPositionManager.Instance.OnFurnitureePlaced(placedObject, worldPosition);
+        }
+        
+        // 주방 감지기는 ObjectPlacer에서 실제 인스턴스로 처리됩니다
 
         selectedData = GetSelectedGridData();
 
@@ -1038,6 +1047,16 @@ public class PlacementSystem : MonoBehaviour
                 Vector3 worldPosition = grid.GetCellCenterWorld(currentPos);
                 int index = objectPlacer.PlaceObject(database.objectsData[selectedObjectIndex].Prefab, worldPosition, previewRotation);
                 PlayerWallet.Instance.SpendMoney(database.objectsData[selectedObjectIndex].BuildPrice);
+                
+                // 작업 위치 관리자에게 새 가구 배치 알림
+                if (JY.WorkPositionManager.Instance != null)
+                {
+                    GameObject placedObject = database.objectsData[selectedObjectIndex].Prefab;
+                    JY.WorkPositionManager.Instance.OnFurnitureePlaced(placedObject, worldPosition);
+                }
+                
+                // 주방 감지기는 ObjectPlacer에서 실제 인스턴스로 처리됩니다
+                
                 selectedData.AddObjectAt(currentPos, objectSize, database.objectsData[selectedObjectIndex].ID, index, 
                 database.objectsData[selectedObjectIndex].kindIndex, previewRotation, grid, isWall);
             }
@@ -1192,6 +1211,8 @@ public class PlacementSystem : MonoBehaviour
         // GridData에서 데이터 제거
         if (selectedData.RemoveObjectByIndex(objectIndex))
         {
+            // 주방 감지기는 ObjectPlacer에서 실제 오브젝트로 처리됩니다
+            
             // ObjectPlacer에서 오브젝트 제거
             objectPlacer.RemoveObject(objectIndex);
             PlayerWallet.Instance.AddMoney(objectData.BuildPrice);

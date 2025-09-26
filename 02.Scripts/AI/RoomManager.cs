@@ -45,12 +45,17 @@ namespace JY
         [Tooltip("결제 내역")]
         [SerializeField] private List<string> paymentLogs = new List<string>();
         
+        [Header("청소 시스템")]
+        [Tooltip("방 청소 상태 추적")]
+        [SerializeField] private List<bool> roomCleaningStatus = new List<bool>();
+        
         /// <summary>
         /// 시스템 초기화 및 방 자동 검색
         /// </summary>
         private void Start()
         {
             FindAllRooms();
+            InitializeCleaningSystem();
             
             // 명성도 시스템이 참조되지 않았다면 자동으로 찾기
             if (reputationSystem == null)
@@ -258,6 +263,109 @@ namespace JY
         {
             return allRooms.Where(r => !r.IsRoomUsed).ToList();
         }
+        
+        #region 청소 시스템
+        
+        /// <summary>
+        /// 청소 시스템 초기화
+        /// </summary>
+        private void InitializeCleaningSystem()
+        {
+            roomCleaningStatus.Clear();
+            for (int i = 0; i < allRooms.Count; i++)
+            {
+                roomCleaningStatus.Add(false);
+            }
+            DebugLog("청소 시스템 초기화 완료", true);
+        }
+        
+        /// <summary>
+        /// 방 청소 요청
+        /// </summary>
+        /// <param name="roomIndex">청소할 방 인덱스</param>
+        public void RequestRoomCleaning(int roomIndex)
+        {
+            if (roomIndex < 0 || roomIndex >= allRooms.Count)
+            {
+                DebugLog($"잘못된 방 인덱스: {roomIndex}", true);
+                return;
+            }
+            
+            if (roomIndex < roomCleaningStatus.Count)
+            {
+                roomCleaningStatus[roomIndex] = true;
+                DebugLog($"방 {allRooms[roomIndex].roomID} 청소 요청됨", true);
+            }
+        }
+        
+        /// <summary>
+        /// 방 청소 완료 처리
+        /// </summary>
+        /// <param name="roomIndex">청소 완료된 방 인덱스</param>
+        public void CompleteRoomCleaning(int roomIndex)
+        {
+            if (roomIndex < 0 || roomIndex >= allRooms.Count)
+            {
+                DebugLog($"잘못된 방 인덱스: {roomIndex}", true);
+                return;
+            }
+            
+            if (roomIndex < roomCleaningStatus.Count)
+            {
+                roomCleaningStatus[roomIndex] = false;
+                allRooms[roomIndex].ReleaseRoom(); // 방을 사용 가능 상태로 변경
+                DebugLog($"방 {allRooms[roomIndex].roomID} 청소 완료", true);
+            }
+        }
+        
+        /// <summary>
+        /// 방이 청소 중인지 확인
+        /// </summary>
+        /// <param name="roomIndex">확인할 방 인덱스</param>
+        /// <returns>청소 중이면 true</returns>
+        public bool IsRoomBeingCleaned(int roomIndex)
+        {
+            if (roomIndex < 0 || roomIndex >= roomCleaningStatus.Count)
+                return false;
+                
+            return roomCleaningStatus[roomIndex];
+        }
+        
+        /// <summary>
+        /// 청소 중인 방 목록 반환
+        /// </summary>
+        /// <returns>청소 중인 방 목록</returns>
+        public List<RoomContents> GetCleaningRooms()
+        {
+            List<RoomContents> cleaningRooms = new List<RoomContents>();
+            for (int i = 0; i < allRooms.Count && i < roomCleaningStatus.Count; i++)
+            {
+                if (roomCleaningStatus[i])
+                {
+                    cleaningRooms.Add(allRooms[i]);
+                }
+            }
+            return cleaningRooms;
+        }
+        
+        /// <summary>
+        /// 청소 가능한 방 목록 반환 (사용 중이지 않고 청소 중이지 않은 방)
+        /// </summary>
+        /// <returns>청소 가능한 방 목록</returns>
+        public List<RoomContents> GetAvailableRoomsForCleaning()
+        {
+            List<RoomContents> availableRooms = new List<RoomContents>();
+            for (int i = 0; i < allRooms.Count && i < roomCleaningStatus.Count; i++)
+            {
+                if (!allRooms[i].IsRoomUsed && !roomCleaningStatus[i])
+                {
+                    availableRooms.Add(allRooms[i]);
+                }
+            }
+            return availableRooms;
+        }
+        
+        #endregion
         
         #region 디버그 메서드
         

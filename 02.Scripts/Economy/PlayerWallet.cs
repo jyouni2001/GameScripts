@@ -25,12 +25,19 @@ public class PlayerWallet : MonoBehaviour
         OnMoneyChanged?.Invoke(money); // 돈이 추가될 때 이벤트 발생
     }
 
-    public void SpendMoney(int amount)
+    public bool SpendMoney(int amount)
     {
         if (money >= amount)
         {
             money -= amount;
             OnMoneyChanged?.Invoke(money); // 돈이 감소될 때 이벤트 발생
+            return true; // 성공
         }
+        return false; // 실패
+    }
+    
+    public bool CanAfford(int amount)
+    {
+        return money >= amount;
     }
 }
