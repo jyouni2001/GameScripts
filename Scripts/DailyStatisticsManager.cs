@@ -108,12 +108,24 @@ public class DailyStatisticsManager : MonoBehaviour
             int currentDay = JY.TimeSystem.Instance != null ? JY.TimeSystem.Instance.CurrentDay : 1;
             currentDayStatistics = statisticsContainer.GetOrCreateDailyStatistics(currentDay);
             UpdateCurrentValues();
-            startingReputation = currentReputation;
-            startingGold = currentGold;
+            
+            // PlayerWallet이 준비되지 않았으면 기본값 사용
+            if (PlayerWallet.Instance == null)
+            {
+                DebugLog("PlayerWallet이 아직 준비되지 않음. 기본값으로 초기화", true);
+                startingReputation = 0;
+                startingGold = 0;
+            }
+            else
+            {
+                startingReputation = currentReputation;
+                startingGold = currentGold;
+            }
+            
             totalVisitorsToday = 0;
             currentActiveVisitors = 0;
             lastActiveVisitorCount = 0;
-            DebugLog($"현재 날 통계 초기화: {currentDay}일차", true);
+            DebugLog($"현재 날 통계 초기화: {currentDay}일차, StartingGold: {startingGold}", true);
         }
         
         if (enableAutoSave)
@@ -302,6 +314,14 @@ public class DailyStatisticsManager : MonoBehaviour
         if (PlayerWallet.Instance != null)
         {
             currentGold = PlayerWallet.Instance.money;
+            
+            // startingGold가 0이고 현재 골드가 0이 아니면 startingGold 설정
+            if (startingGold == 0 && currentGold > 0)
+            {
+                startingGold = currentGold;
+                startingReputation = currentReputation;
+                DebugLog($"PlayerWallet 준비됨 - StartingGold 설정: {startingGold}", true);
+            }
         }
         
         // AISpawner에서 현재 활성 방문객 수 가져오기
