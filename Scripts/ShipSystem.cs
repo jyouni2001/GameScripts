@@ -12,11 +12,24 @@ namespace JY
     /// </summary>
     public class ShipSystem : MonoBehaviour
     {
-        [Header("배 시스템 설정")]
-        [SerializeField] private bool enableShipSystem = true;
-        [SerializeField] private GameObject shipPrefab;
-        [SerializeField] private int maxShipCount = 5; // 최대 배 개수
-        [SerializeField] private Transform shipPos;
+    [Header("배 시스템 설정")]
+    [SerializeField] private bool enableShipSystem = true;
+    [SerializeField] private int maxShipCount = 5; // 최대 배 개수
+    [SerializeField] private Transform shipPos;
+
+    [Header("명성도별 배 프리펩 설정")]
+    [Tooltip("기본 배 (명성도 0~499)")]
+    [SerializeField] private GameObject smallShipPrefab;
+    [Tooltip("중형 배 (명성도 500~1999)")]
+    [SerializeField] private GameObject mediumShipPrefab;
+    [Tooltip("대형 배 (명성도 2000 이상)")]
+    [SerializeField] private GameObject largeShipPrefab;
+    
+    [Header("명성도 임계값 설정")]
+    [Tooltip("중형 배 사용을 위한 최소 명성도")]
+    [SerializeField] private int mediumShipReputationThreshold = 500;
+    [Tooltip("대형 배 사용을 위한 최소 명성도")]
+    [SerializeField] private int largeShipReputationThreshold = 2000;
 
         [Header("시간 설정")]
         [SerializeField] private float spawnTimeBeforeArrival = 5f; // 도착 5분 전 스폰 (분)
@@ -78,7 +91,9 @@ namespace JY
                 shipPool = gameObject.AddComponent<ShipObjectPool>();
                 shipPool.FirstShipPos = shipPos.position;
             }
-            shipPool.Initialize(shipPrefab, maxShipCount);
+            // 기본 배 프리펩으로 초기화 (나중에 명성도별로 변경 가능)
+            GameObject defaultPrefab = smallShipPrefab ?? mediumShipPrefab ?? largeShipPrefab;
+            shipPool.Initialize(defaultPrefab, maxShipCount);
             
             DebugLog("배 시스템 초기화 완료", true);
         }
@@ -174,6 +189,39 @@ namespace JY
         }
         
         /// <summary>
+        /// 현재 명성도에 따른 적절한 배 프리펩 선택
+        /// </summary>
+        /// <returns>선택된 배 프리펩</returns>
+        private GameObject GetShipPrefabByReputation()
+        {
+            // ReputationSystem에서 현재 명성도 가져오기
+            if (ReputationSystem.Instance == null)
+            {
+                DebugLog("ReputationSystem을 찾을 수 없습니다. 기본 배 사용", true);
+                return smallShipPrefab;
+            }
+            
+            int currentReputation = ReputationSystem.Instance.CurrentReputation;
+            
+            // 명성도에 따른 배 선택
+            if (currentReputation >= largeShipReputationThreshold && largeShipPrefab != null)
+            {
+                DebugLog($"대형 배 선택 (명성도: {currentReputation})", false);
+                return largeShipPrefab;
+            }
+            else if (currentReputation >= mediumShipReputationThreshold && mediumShipPrefab != null)
+            {
+                DebugLog($"중형 배 선택 (명성도: {currentReputation})", false);
+                return mediumShipPrefab;
+            }
+            else
+            {
+                DebugLog($"기본 배 선택 (명성도: {currentReputation})", false);
+                return smallShipPrefab ?? mediumShipPrefab ?? largeShipPrefab; // 기본 배가 없으면 다른 배 사용
+            }
+        }
+        
+        /// <summary>
         /// 배 스케줄 확인 및 처리
         /// </summary>
         private void CheckShipSchedules()
@@ -263,11 +311,20 @@ namespace JY
         }
         
         /// <summary>
-        /// 배 스폰 처리
+        /// 배 스폰 처리 (명성도에 따른 프리펩 선택)
         /// </summary>
         private void SpawnShip(ShipSchedule schedule)
         {
-            GameObject shipObj = shipPool.GetShip();
+            // 현재 명성도에 따른 적절한 배 프리펩 선택
+            GameObject selectedPrefab = GetShipPrefabByReputation();
+            if (selectedPrefab == null)
+            {
+                DebugLog("사용할 수 있는 배 프리펩이 없습니다.", true);
+                return;
+            }
+            
+            // 선택된 프리펩으로 배 생성
+            GameObject shipObj = shipPool.GetShipByPrefab(selectedPrefab);
             if (shipObj == null)
             {
                 DebugLog("사용 가능한 배가 없습니다.", true);
@@ -291,7 +348,7 @@ namespace JY
             // 활성 배 목록에 추가
             activeShips.Add(shipController);
             
-            DebugLog($"배 스폰됨: {schedule.route.routeId}", true);
+            DebugLog($"배 스폰됨: {schedule.route.routeId} (프리펩: {selectedPrefab.name})", true);
             
             // 이벤트 발생
             OnShipSpawned?.Invoke(shipController);
