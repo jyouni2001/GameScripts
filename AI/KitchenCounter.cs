@@ -26,6 +26,7 @@ namespace JY
     // 내부 변수
     private bool isProcessingOrder = false;
     private AIEmployee currentAssignedEmployee;
+    private AIEmployee assignedKitchenEmployee;  // 이 주방에 배정된 전담 직원
     private KitchenComponent associatedKitchen;
     private Queue<AIAgent> customerQueue = new Queue<AIAgent>();
     private AIAgent currentCustomer;
@@ -404,11 +405,20 @@ namespace JY
         }
         
         /// <summary>
-        /// 근처 AI 직원 찾기
+        /// 근처 AI 직원 찾기 (주방당 1명 전담 제도)
         /// </summary>
         private AIEmployee FindNearbyEmployee()
         {
-            // 모든 AI 직원 검색 (간단하게)
+            // 이미 배정된 전담 직원이 있고, 사용 가능하면 그 직원 사용
+            if (assignedKitchenEmployee != null && 
+                assignedKitchenEmployee.isHired && 
+                !assignedKitchenEmployee.isProcessingOrder)
+            {
+                DebugLog($"전담 직원 사용: {assignedKitchenEmployee.employeeName}");
+                return assignedKitchenEmployee;
+            }
+            
+            // 전담 직원이 없거나 사용 불가능하면 새로 배정
             AIEmployee[] allEmployees = FindObjectsByType<AIEmployee>(FindObjectsSortMode.None);
             AIEmployee closestEmployee = null;
             float closestDistance = float.MaxValue;
@@ -420,11 +430,15 @@ namespace JY
                     // 같은 주방에 있는 직원인지 확인
                     if (IsEmployeeInSameKitchen(employee))
                     {
-                        float distance = Vector3.Distance(transform.position, employee.transform.position);
-                        if (distance < closestDistance)
+                        // 이미 다른 주방에 배정된 직원인지 확인
+                        if (!IsEmployeeAssignedToOtherKitchen(employee))
                         {
-                            closestDistance = distance;
-                            closestEmployee = employee;
+                            float distance = Vector3.Distance(transform.position, employee.transform.position);
+                            if (distance < closestDistance)
+                            {
+                                closestDistance = distance;
+                                closestEmployee = employee;
+                            }
                         }
                     }
                 }
@@ -432,10 +446,28 @@ namespace JY
             
             if (closestEmployee != null)
             {
-                DebugLog($"담당 직원 발견: {closestEmployee.employeeName} (거리: {closestDistance:F1}m)");
+                // 이 주방에 전담 직원으로 배정
+                assignedKitchenEmployee = closestEmployee;
+                DebugLog($"새 전담 직원 배정: {closestEmployee.employeeName} (거리: {closestDistance:F1}m)");
             }
             
             return closestEmployee;
+        }
+        
+        /// <summary>
+        /// 직원이 다른 주방에 이미 배정되어 있는지 확인
+        /// </summary>
+        private bool IsEmployeeAssignedToOtherKitchen(AIEmployee employee)
+        {
+            KitchenCounter[] allCounters = FindObjectsByType<KitchenCounter>(FindObjectsSortMode.None);
+            foreach (var counter in allCounters)
+            {
+                if (counter != this && counter.assignedKitchenEmployee == employee)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
         
         /// <summary>
@@ -459,7 +491,6 @@ namespace JY
         {
             if (showDebugLogs)
             {
-                Debug.Log($"[KitchenCounter] {message}");
             }
         }
         

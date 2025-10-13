@@ -253,33 +253,46 @@ namespace JY
         /// </summary>
         private IEnumerator ProcessOrderCoroutine()
         {
-            // 1. 주문 받기 (3초 대기)
+            // 1. 주문 받기 (3초 대기) - 작업 위치에서 대기 애니메이션
             SetState(EmployeeState.ReceivingOrder);
-            PlayAnimation(idleAnimationTrigger); // 주문 받는 애니메이션
+            CleanUpAnimation();
+            PlayAnimation(idleAnimationTrigger); // 기본 대기 애니메이션
             DebugLog("📋 주문 받는 중...", true);
             yield return new WaitForSeconds(3f);
             
             // 2. Gas 위치 찾기 및 이동
             if (FindGasPosition())
             {
-                DebugLog("🔥 가스레인지로 이동 시작", true);
+                DebugLog("🔥 인덕션으로 이동 시작", true);
                 SetState(EmployeeState.MovingToGas);
                 MoveToPosition(gasPosition);
                 
-                // 가스 위치 도착까지 대기
+                // 인덕션 위치 도착까지 대기
                 while (Vector3.Distance(transform.position, gasPosition.position) > 1.5f)
                 {
                     yield return new WaitForSeconds(0.1f);
                 }
                 
-                // 3. 가스에서 요리 (3초)
+                // 3. 인덕션에서 요리 (인덕션 회전값으로 서기)
                 SetState(EmployeeState.Cooking);
-                PlayAnimation(workAnimationTrigger); // 요리 애니메이션
+                
+                // 인덕션의 위치와 회전값으로 정확히 맞추기
+                transform.position = gasPosition.position;
+                transform.rotation = gasPosition.rotation;
+                DebugLog($"👨‍🍳 인덕션 위치로 이동 완료 - 위치: {gasPosition.position}, 회전: {gasPosition.rotation.eulerAngles}", true);
+                
+                // 요리 애니메이션 재생
+                CleanUpAnimation();
+                PlayAnimationBool(workAnimationTrigger, true);
                 DebugLog("👨‍🍳 요리 중...", true);
                 yield return new WaitForSeconds(3f);
                 
-                // 4. 원래 위치로 복귀
+                // 요리 애니메이션 종료
+                PlayAnimationBool(workAnimationTrigger, false);
+
+                // 4. 원래 작업 위치로 복귀
                 DebugLog("🏃‍♂️ 작업 위치로 복귀", true);
+                CleanUpAnimation();
                 SetState(EmployeeState.Moving);
                 MoveToPosition(workPosition);
                 
@@ -288,14 +301,25 @@ namespace JY
                 {
                     yield return new WaitForSeconds(0.1f);
                 }
+
+                // 5. 작업 위치에서 원래 각도로 복귀
+                if (workPosition != null)
+                {
+                    transform.position = workPosition.position;
+                    transform.rotation = workPosition.rotation;
+                    DebugLog($"✅ 작업 위치 복귀 완료 - 위치: {workPosition.position}, 회전: {workPosition.rotation.eulerAngles}", true);
+                }
                 
+                // 기본 대기 애니메이션으로 전환
+                CleanUpAnimation();
                 SetState(EmployeeState.Working);
-                PlayAnimation(workAnimationTrigger);
+                PlayAnimation(idleAnimationTrigger);
             }
             else
             {
-                DebugLog("❌ 가스레인지를 찾을 수 없습니다!", true);
+                DebugLog("❌ 인덕션을 찾을 수 없습니다!", true);
                 SetState(EmployeeState.Working);
+                PlayAnimation(idleAnimationTrigger);
             }
             
             _isProcessingOrder = false;
@@ -304,7 +328,7 @@ namespace JY
         }
         
         /// <summary>
-        /// 현재 주방 공간의 Gas 위치 찾기
+        /// 현재 주방 공간의 인덕션 위치 찾기
         /// </summary>
         private bool FindGasPosition()
         {
@@ -338,11 +362,11 @@ namespace JY
             if (closestGas != null)
             {
                 gasPosition = closestGas;
-                DebugLog($"🔥 가스레인지 발견: {closestGas.name}", true);
+                DebugLog($"🔥 인덕션 발견: {closestGas.name} (위치: {closestGas.position}, 회전: {closestGas.rotation.eulerAngles})", true);
                 return true;
             }
             
-            DebugLog("❌ 주방 내 가스레인지를 찾을 수 없습니다.", true);
+            DebugLog("❌ 주방 내 인덕션을 찾을 수 없습니다.", true);
             return false;
         }
         
@@ -415,6 +439,12 @@ namespace JY
                 navAgent = gameObject.AddComponent<NavMeshAgent>();
             }
             navAgent.speed = moveSpeed;
+            
+            // NavMeshAgent 관성 제거 설정
+            navAgent.acceleration = 100f;        // 가속도 증가 (빠르게 가속)
+            navAgent.angularSpeed = 360f;        // 회전 속도 증가 (빠르게 회전)
+            navAgent.stoppingDistance = 0.1f;    // 정지 거리 감소
+            navAgent.autoBraking = true;         // 자동 브레이킹 활성화
             
             // Animator 설정
             if (animator == null)
@@ -738,14 +768,30 @@ namespace JY
         {
             if (navAgent != null && navAgent.remainingDistance < 0.5f && !navAgent.pathPending)
             {
-                // 근무시간이면 작업 시작, 아니면 휴식
-                if (IsWorkTime)
+                // 목적지 도착 후 해당 위치의 방향으로 회전
+                if (IsWorkTime && workPosition != null)
                 {
+                    // 작업 위치의 방향으로 회전
+                    transform.rotation = workPosition.rotation;
                     SetState(EmployeeState.Working);
+                }
+                else if (!IsWorkTime && waitingPosition != null)
+                {
+                    // 대기 위치의 방향으로 회전
+                    transform.rotation = waitingPosition.rotation;
+                    SetState(EmployeeState.Resting);
                 }
                 else
                 {
-                    SetState(EmployeeState.Resting);
+                    // 위치 정보가 없으면 상태만 변경
+                    if (IsWorkTime)
+                    {
+                        SetState(EmployeeState.Working);
+                    }
+                    else
+                    {
+                        SetState(EmployeeState.Resting);
+                    }
                 }
             }
         }
@@ -755,6 +801,18 @@ namespace JY
         /// </summary>
         private void HandleWorkingState()
         {
+            // 작업 위치에 있을 때는 기본 대기 애니메이션 유지
+            if (animator != null)
+            {
+                // 이동 중이 아니면 대기 애니메이션
+                bool isMoving = navAgent != null && navAgent.velocity.magnitude > 0.1f;
+                if (!isMoving && !_isProcessingOrder)
+                {
+                    CleanUpAnimation();
+                    PlayAnimation(idleAnimationTrigger);
+                }
+            }
+            
             if (!isWorking)
             {
                 StartWork();
@@ -860,23 +918,36 @@ namespace JY
             switch (state)
             {
                 case EmployeeState.Idle:
+                    CleanUpAnimation();
                     PlayAnimation(idleAnimationTrigger);
                     break;
                 case EmployeeState.Moving:
-                    PlayAnimation(moveAnimationTrigger);
+                    CleanUpAnimation();
+                    PlayAnimationBool(moveAnimationTrigger, true);
+                    //PlayAnimation(moveAnimationTrigger);
                     break;
                 case EmployeeState.Working:
-                    PlayAnimation(workAnimationTrigger);
+                    CleanUpAnimation();
+                    PlayAnimationBool(workAnimationTrigger, true);
+                    //PlayAnimation(workAnimationTrigger);
                     break;
                 case EmployeeState.Resting:
+                    CleanUpAnimation();
                     PlayAnimation(idleAnimationTrigger);
                     break;
                 case EmployeeState.OffDuty:
+                    CleanUpAnimation();
                     PlayAnimation(idleAnimationTrigger);
                     break;
             }
         }
-        
+
+        private void CleanUpAnimation()
+        {
+            PlayAnimationBool(workAnimationTrigger, false);
+            PlayAnimationBool(moveAnimationTrigger, false);
+        }
+
         #endregion
         
         #region 이동 관리
@@ -920,6 +991,7 @@ namespace JY
             // 주문 받는 중 - 코루틴에서 처리하므로 여기서는 애니메이션만 확인
             if (animator != null)
             {
+                CleanUpAnimation();
                 PlayAnimation(idleAnimationTrigger);
             }
         }
@@ -932,7 +1004,8 @@ namespace JY
             // 가스 위치로 이동 중 - 코루틴에서 처리
             if (animator != null && !isMoving)
             {
-                PlayAnimation(moveAnimationTrigger);
+                CleanUpAnimation();
+                PlayAnimationBool(moveAnimationTrigger, true);
                 isMoving = true;
             }
         }
@@ -945,7 +1018,7 @@ namespace JY
             // 요리 중 - 애니메이션 확인
             if (animator != null)
             {
-                PlayAnimation(workAnimationTrigger);
+                PlayAnimationBool(workAnimationTrigger, true);
             }
         }
         
@@ -1036,6 +1109,15 @@ namespace JY
             if (animator != null && !string.IsNullOrEmpty(triggerName))
             {
                 animator.SetTrigger(triggerName);
+            }
+        }
+
+        private void PlayAnimationBool(string animationName, bool working)
+        {
+            if (animator != null && !string.IsNullOrEmpty(animationName))
+            {
+
+                animator.SetBool(animationName, working);
             }
         }
         
@@ -1132,8 +1214,6 @@ namespace JY
             if (!showDebugLogs) return;
             
             if (showImportantLogsOnly && !isImportant) return;
-            
-            Debug.Log($"[AIEmployee] {employeeName}: {message}");
         }
         
         #endregion
@@ -1319,16 +1399,14 @@ namespace JY
             // 작업 위치가 null인지 확인
             if (workPosition == null)
             {
-               
-                
                 // 위치 재할당 시도
-                DebugLog("작업 위치가 null입니다. 재할당을 시도합니다.", true);
+                DebugLog("⚠️ 작업 위치가 null입니다. 재할당을 시도합니다.", true);
                 AssignWorkPositions();
                 
                 // 재할당 후에도 null이면 문제가 있음
                 if (workPosition == null)
                 {
-                    DebugLog($"위치 재할당 실패. 태그 '{workPositionTag}'를 확인하세요!", true);
+                    DebugLog($"❌ 위치 재할당 실패. 태그 '{workPositionTag}'를 확인하세요!", true);
                     
                     // 30초 후 다시 시도하고, 그래도 실패하면 해고
                     if (!hasRetryAttempted)
@@ -1336,10 +1414,16 @@ namespace JY
                         hasRetryAttempted = true;
                         StartCoroutine(RetryPositionAssignment());
                     }
+                    else
+                    {
+                        // 이미 재시도했으나 실패한 경우 즉시 해고
+                        DebugLog($"🔥 최종 위치 할당 실패! 직원을 즉시 해고합니다.", true);
+                        ReturnToSpawnAndFire();
+                    }
                 }
                 else
                 {
-                    DebugLog($"위치 재할당 성공: {workPosition.name}", true);
+                    DebugLog($"✅ 위치 재할당 성공: {workPosition.name}", true);
                     hasRetryAttempted = false;
                 }
                 return;
@@ -1348,17 +1432,73 @@ namespace JY
             // workPosition이 실제로 파괴되었는지 확인 (Unity의 null 체크)
             if (workPosition != null && workPosition.gameObject == null)
             {
-                DebugLog($"작업 위치 오브젝트가 실제로 파괴되었습니다. 직원을 해고하고 스폰 포인트로 이동합니다.", true);
+                DebugLog($"🚨 작업 위치 오브젝트가 삭제되었습니다! 직원을 해고하고 스폰 포인트로 이동합니다.", true);
                 ReturnToSpawnAndFire();
                 return;
             }
             
-            // 대기 위치 확인 (자동 생성 비활성화)
-            if (waitingPosition == null)
+            // 배정된 카운터 체크 (카운터 직원인 경우)
+            if (assignedCounter != null && assignedCounter.gameObject == null)
             {
-                DebugLog($"⚠️ 대기 위치가 없습니다. 태그 '{waitingPositionTag}'를 가진 오브젝트를 수동으로 생성하세요!", true);
-                // 자동 생성 비활성화
-                // CreateWaitingPositionNearWork();
+                DebugLog($"🚨 배정된 카운터가 삭제되었습니다! 직원을 해고합니다.", true);
+                ReturnToSpawnAndFire();
+                return;
+            }
+            
+            // 배정된 식당 체크 (식당 직원인 경우)
+            if (assignedKitchen != null && assignedKitchen.gameObject == null)
+            {
+                DebugLog($"🚨 배정된 식당이 삭제되었습니다! 직원을 해고합니다.", true);
+                ReturnToSpawnAndFire();
+                return;
+            }
+            
+            // 인덕션 위치 체크 (요리 중일 때)
+            if (gasPosition != null && gasPosition.gameObject == null)
+            {
+                DebugLog($"🚨 인덕션이 삭제되었습니다! 주문 처리를 중단합니다.", true);
+                HandleGasDestroyed();
+            }
+            
+            // 대기 위치 확인
+            if (waitingPosition != null && waitingPosition.gameObject == null)
+            {
+                DebugLog($"⚠️ 대기 위치가 삭제되었습니다. 재할당을 시도합니다.", true);
+                AssignWaitingPositionByTag();
+                
+                // 재할당 실패 시 경고만 출력 (해고하지 않음)
+                if (waitingPosition == null)
+                {
+                    DebugLog($"⚠️ 대기 위치 재할당 실패. 태그 '{waitingPositionTag}'를 확인하세요!", true);
+                }
+            }
+        }
+        
+        /// <summary>
+        /// 가스레인지가 삭제되었을 때 처리
+        /// </summary>
+        private void HandleGasDestroyed()
+        {
+            // 주문 처리 중지
+            _isProcessingOrder = false;
+            gasPosition = null;
+            
+            // 코루틴 중지
+            if (orderProcessingCoroutine != null)
+            {
+                StopCoroutine(orderProcessingCoroutine);
+                orderProcessingCoroutine = null;
+            }
+            
+            // 작업 위치로 복귀
+            if (workPosition != null)
+            {
+                SetState(EmployeeState.Moving);
+                MoveToPosition(workPosition);
+            }
+            else
+            {
+                SetState(EmployeeState.Idle);
             }
         }
         
@@ -1367,14 +1507,17 @@ namespace JY
         /// </summary>
         private void ReturnToSpawnAndFire()
         {
+            // 주문 처리 중지 (혹시 모를 경우 대비)
+            _isProcessingOrder = false;
+            
             // 스폰 포인트로 이동
             if (EmployeeHiringSystem.Instance != null && EmployeeHiringSystem.Instance.transform != null)
             {
                 Transform spawnPoint = EmployeeHiringSystem.Instance.transform;
-                if (navAgent != null)
+                if (navAgent != null && navAgent.enabled)
                 {
                     navAgent.SetDestination(spawnPoint.position);
-                    DebugLog($"스폰 포인트로 이동 중: {spawnPoint.position}");
+                    DebugLog($"📍 스폰 포인트로 이동 중: {spawnPoint.position}", true);
                 }
             }
             
@@ -1486,7 +1629,6 @@ namespace JY
         [ContextMenu("위치 정보 출력")]
         private void EditorShowPositionInfo()
         {
-            Debug.Log($"[{employeeName}] {GetAssignedPositionInfo()}");
         }
         #endif
         
