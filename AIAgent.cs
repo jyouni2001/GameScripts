@@ -2046,13 +2046,13 @@ public class AIAgent : MonoBehaviour
         int targetHour = (targetTotalMinutes / 60) % 24;
         int targetMinute = targetTotalMinutes % 60;
         
-        // 안전장치: 최대 대기 시간 (실제 시간 10분)
+        // 안전장치: 최대 대기 시간 (실제 시간 10분 = Time.unscaledTime 기준)
         float maxWaitTime = 600f;
-        float elapsedTime = 0f;
+        float startRealTime = Time.unscaledTime;
         float checkInterval = 0.5f; // 0.5초마다 체크 (빠른 감지)
         
         // 게임 시간이 목표 시간에 도달할 때까지 대기
-        while (isUsingSunbed && elapsedTime < maxWaitTime)
+        while (isUsingSunbed && (Time.unscaledTime - startRealTime) < maxWaitTime)
         {
             // TimeSystem 재확인
             if (timeSystem == null)
@@ -2110,7 +2110,6 @@ public class AIAgent : MonoBehaviour
             }
             
             yield return new WaitForSeconds(checkInterval);
-            elapsedTime += checkInterval;
         }
         
         // 선베드 사용 종료
