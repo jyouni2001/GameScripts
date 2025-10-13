@@ -341,8 +341,8 @@ public class AIAgent : MonoBehaviour
         int hour = timeSystem.CurrentHour;
         int minute = timeSystem.CurrentMinute;
 
-        // 17:00에 방 사용 중이 아닌 모든 에이전트 강제 디스폰
-        if (hour == 17 && minute == 0)
+        // 17:00 이후 방 사용 중이 아닌 모든 에이전트 강제 디스폰
+        if (hour >= 17)
         {
             Handle17OClockForcedDespawn();
             return;
@@ -502,16 +502,24 @@ public class AIAgent : MonoBehaviour
     /// </summary>
     private void Handle17OClockForcedDespawn()
     {
-        // 방 사용 중이거나 수면 중인 AI는 디스폰하지 않음 (선베드 사용자는 예외없이 퇴장)
-        if (IsInRoomRelatedState() || isSleeping)
+        // 방 사용 중이거나 수면 중인 AI는 디스폰하지 않음 (일반 침대만 예외, 선베드는 강제 퇴장)
+        if ((IsInRoomRelatedState() || isSleeping) && !isUsingSunbed)
         {
             return;
+        }
+
+        // 선베드 사용 중인 AI는 강제로 종료 후 퇴장
+        if (isUsingSunbed)
+        {
+            ForceFinishUsingSunbed();
+            return;  // ForceFinishUsingSunbed()에서 이미 디스폰 처리됨
         }
 
         // 주방 카운터 대기 중이거나 식사 중인 AI는 강제로 종료 후 퇴장
         if (isWaitingAtKitchenCounter || currentState == AIState.MovingToKitchenCounter || currentState == AIState.WaitingAtKitchenCounter)
         {
             ForceFinishKitchenActivity();
+            return;  // ForceFinishKitchenActivity()에서 이미 디스폰 처리됨
         }
         else if (isEating)
         {
@@ -695,10 +703,11 @@ public class AIAgent : MonoBehaviour
             int hour = timeSystem.CurrentHour;
             int minute = timeSystem.CurrentMinute;
 
-            // 17:00에 방 사용 중이 아닌 모든 에이전트 강제 디스폰
-            if (hour == 17 && minute == 0)
+            // 17:00 이후 방 사용 중이 아닌 모든 에이전트 강제 디스폰
+            if (hour >= 17 && minute == 0 && lastBehaviorUpdateHour != hour)
             {
                 Handle17OClockForcedDespawn();
+                lastBehaviorUpdateHour = hour;
                 return;
             }
 
@@ -1432,6 +1441,13 @@ public class AIAgent : MonoBehaviour
 
         while (currentState == AIState.UseWandering && agent.isOnNavMesh)
         {
+            // 17시 체크 - 방 외부 배회 중에도 즉시 디스폰
+            if (timeSystem != null && timeSystem.CurrentHour >= 17)
+            {
+                Handle17OClockForcedDespawn();
+                yield break;
+            }
+
             // 방을 피해서 외부 배회
             Vector3 currentPos = transform.position;
             float wanderDistance = Random.Range(15f, 25f);
@@ -1489,6 +1505,13 @@ public class AIAgent : MonoBehaviour
 
         while (currentState == AIState.RoomWandering && elapsedTime < wanderingTime && agent.isOnNavMesh)
         {
+            // 17시 체크 - 방 내부 배회 중에도 즉시 디스폰
+            if (timeSystem != null && timeSystem.CurrentHour >= 17)
+            {
+                Handle17OClockForcedDespawn();
+                yield break;
+            }
+
             // 방 내부에서만 배회
             if (TryGetRoomWanderingPosition(currentRoomIndex, out Vector3 roomPosition))
             {

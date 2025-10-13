@@ -40,8 +40,9 @@ namespace JY
         [Tooltip("근무 위치")]
         public Transform workPosition;
         
-        [Tooltip("대기 위치")]
-        public Transform waitingPosition;
+        [Tooltip("스폰 포인트 (자동 설정)")]
+        [System.NonSerialized]
+        public Transform spawnPoint;
         
         [Tooltip("수동으로 위치 설정 (체크시 태그 기반 자동 할당 무시)")]
         public bool useManualPositions = false;
@@ -50,10 +51,6 @@ namespace JY
         [Tooltip("근무 위치 태그 (EmployeeHiringSystem에서 자동 설정)")]
         [System.NonSerialized]
         public string workPositionTag = "WorkPosition_Reception";
-        
-        [Tooltip("대기 위치 태그 (EmployeeHiringSystem에서 자동 설정)")]
-        [System.NonSerialized]
-        public string waitingPositionTag = "WaitingPosition_Reception";
         
         [Header("배정된 위치 (자동 설정)")]
         [Tooltip("배정된 카운터 (카운터 직원인 경우)")]
@@ -122,6 +119,9 @@ namespace JY
         private bool hasRetryAttempted = false;
         private float lastPositionCheckTime = 0f;
         
+        // 퇴근 관리
+        private bool shouldReturnToSpawn = false;
+        
         // 주방 관련 변수
         private bool _isProcessingOrder = false;
         private Transform gasPosition;
@@ -150,6 +150,7 @@ namespace JY
             Working,        // 작업 중
             Resting,        // 휴식 중
             OffDuty,        // 퇴근
+            ReturningToSpawn, // 스폰 포인트로 복귀 중
             ReceivingOrder, // 주문 받는 중
             MovingToGas,    // 가스레인지로 이동 중
             Cooking         // 요리 중
@@ -325,6 +326,12 @@ namespace JY
             _isProcessingOrder = false;
             orderProcessingCoroutine = null;
             DebugLog("✅ 주문 처리 완료", true);
+            
+            // 주문 처리 완료 후 퇴근 시간이면 퇴근
+            if (shouldReturnToSpawn)
+            {
+                ReturnToSpawn();
+            }
         }
         
         /// <summary>
@@ -412,6 +419,7 @@ namespace JY
             if (!isHired) return;
             
             CheckTimeChanges();
+            CheckWorkSchedule();  // 매 프레임 근무 시간 체크 (퇴근 처리용)
             UpdateBehavior();
             
             // 위치 유효성 검사는 3초마다만 실행 (성능 최적화)
@@ -513,7 +521,7 @@ namespace JY
             // 작업 위치 자동 할당 (태그 기반)
             if (!useManualPositions)
             {
-                DebugLog($"🏷️ 태그 확인 - 작업: '{workPositionTag}', 대기: '{waitingPositionTag}'", true);
+                DebugLog($"🏷️ 태그 확인 - 작업: '{workPositionTag}'", true);
                 DebugLog($"🔄 자동 위치 할당 시작...", true);
                 AssignWorkPositions();
                 
@@ -525,15 +533,6 @@ namespace JY
                 else
                 {
                     DebugLog($"❌ 작업 위치 할당 실패! 태그 '{workPositionTag}'를 확인하세요!", true);
-                }
-                
-                if (waitingPosition != null)
-                {
-                    DebugLog($"✅ 대기 위치 할당 성공: {waitingPosition.name}", true);
-                }
-                else
-                {
-                    DebugLog($"⚠️ 대기 위치 할당 실패", true);
                 }
             }
             else
@@ -640,9 +639,6 @@ namespace JY
             {
                 ProcessSalary();
             }
-            
-            // 근무시간 체크
-            CheckWorkSchedule();
         }
         
         /// <summary>
@@ -664,8 +660,11 @@ namespace JY
             
             if (IsWorkTime)
             {
-                // 근무시간 시작 - 작업위치로 이동
-                if (currentState == EmployeeState.OffDuty || currentState == EmployeeState.Resting)
+                // 근무시간 시작
+                shouldReturnToSpawn = false;  // 퇴근 플래그 리셋
+                
+                // 작업위치로 이동
+                if (currentState == EmployeeState.OffDuty || currentState == EmployeeState.Resting || currentState == EmployeeState.ReturningToSpawn)
                 {
                     SetState(EmployeeState.Idle);
                     
@@ -678,17 +677,38 @@ namespace JY
             }
             else
             {
-                // 퇴근시간 - 대기위치로 이동
-                if (currentState != EmployeeState.OffDuty && currentState != EmployeeState.Resting)
+                // 퇴근시간 - 플래그 설정
+                if (!shouldReturnToSpawn)
                 {
-                    SetState(EmployeeState.OffDuty);
-                    
-                    // 즉시 대기위치로 이동 시작
-                    if (waitingPosition != null)
-                    {
-                        MoveToPosition(waitingPosition);
-                    }
+                    shouldReturnToSpawn = true;
                 }
+                
+                // 작업 중이 아니면 즉시 퇴근 (Idle, Working 상태만 체크)
+                if (currentState != EmployeeState.ReturningToSpawn && 
+                    !_isProcessingOrder && 
+                    (currentState == EmployeeState.Idle || currentState == EmployeeState.Working))
+                {
+                    ReturnToSpawn();
+                }
+            }
+        }
+        
+        /// <summary>
+        /// 스폰 포인트로 복귀
+        /// </summary>
+        private void ReturnToSpawn()
+        {
+            SetState(EmployeeState.ReturningToSpawn);
+            
+            // 스폰 포인트로 이동 시작
+            if (spawnPoint != null)
+            {
+                MoveToPosition(spawnPoint);
+            }
+            else
+            {
+                // 스폰 포인트가 없으면 즉시 디스폰
+                DespawnEmployee();
             }
         }
         
@@ -719,6 +739,9 @@ namespace JY
                     break;
                 case EmployeeState.OffDuty:
                     HandleOffDutyState();
+                    break;
+                case EmployeeState.ReturningToSpawn:
+                    HandleReturningToSpawnState();
                     break;
                 case EmployeeState.ReceivingOrder:
                     HandleReceivingOrderState();
@@ -775,11 +798,10 @@ namespace JY
                     transform.rotation = workPosition.rotation;
                     SetState(EmployeeState.Working);
                 }
-                else if (!IsWorkTime && waitingPosition != null)
+                else if (!IsWorkTime && spawnPoint != null && currentState == EmployeeState.ReturningToSpawn)
                 {
-                    // 대기 위치의 방향으로 회전
-                    transform.rotation = waitingPosition.rotation;
-                    SetState(EmployeeState.Resting);
+                    // 스폰 포인트 도착 - 디스폰 처리는 HandleReturningToSpawnState에서 처리
+                    // 상태는 그대로 유지
                 }
                 else
                 {
@@ -790,7 +812,7 @@ namespace JY
                     }
                     else
                     {
-                        SetState(EmployeeState.Resting);
+                        SetState(EmployeeState.ReturningToSpawn);
                     }
                 }
             }
@@ -834,9 +856,23 @@ namespace JY
         }
         
         /// <summary>
-        /// 퇴근 상태 처리
+        /// 퇴근 상태 처리 (더 이상 사용하지 않음, 호환성을 위해 유지)
         /// </summary>
         private void HandleOffDutyState()
+        {
+            // 스폰 포인트로 복귀 상태로 전환
+            if (IsWorkTime) 
+            {
+                // 근무시간이 되었으므로 다시 근무 시작 (만약을 위한 fallback)
+                SetState(EmployeeState.Idle);
+                return;
+            }
+        }
+        
+        /// <summary>
+        /// 스폰 포인트로 복귀 상태 처리
+        /// </summary>
+        private void HandleReturningToSpawnState()
         {
             // 퇴근시간인지 확인
             if (IsWorkTime) 
@@ -846,22 +882,37 @@ namespace JY
                 return;
             }
             
-            // 이미 대기위치에 있는지 확인
-            if (waitingPosition != null && Vector3.Distance(transform.position, waitingPosition.position) < 1f)
+            // 스폰 포인트에 도착했는지 확인
+            if (spawnPoint != null && Vector3.Distance(transform.position, spawnPoint.position) < 1f)
             {
-                // 대기위치에 도착했으므로 휴식
+                // 스폰 포인트 도착 - 디스폰
                 if (!isMoving)
                 {
-                    SetState(EmployeeState.Resting);
+                    DespawnEmployee();
                 }
                 return;
             }
             
-            // 대기위치로 이동
-            if (waitingPosition != null && !isMoving)
+            // 스폰 포인트가 없으면 즉시 디스폰
+            if (spawnPoint == null)
             {
-                MoveToPosition(waitingPosition);
+                DespawnEmployee();
             }
+        }
+        
+        /// <summary>
+        /// 직원 디스폰 처리
+        /// </summary>
+        private void DespawnEmployee()
+        {
+            // EmployeeHiringSystem에 알림
+            if (EmployeeHiringSystem.Instance != null)
+            {
+                EmployeeHiringSystem.Instance.OnEmployeeDespawned(this);
+            }
+            
+            // 오브젝트 파괴
+            Destroy(gameObject);
         }
         
         #endregion
@@ -1239,17 +1290,10 @@ namespace JY
                 DebugLog($"⚠️ 작업 위치 태그가 비어있어 기본값으로 설정: {workPositionTag}", true);
             }
             
-            if (string.IsNullOrEmpty(waitingPositionTag))
-            {
-                waitingPositionTag = "WaitingPosition_Reception";
-                DebugLog($"⚠️ 대기 위치 태그가 비어있어 기본값으로 설정: {waitingPositionTag}", true);
-            }
-            
-            DebugLog($"🏷️ 할당할 태그 최종 확인 - 작업: '{workPositionTag}', 대기: '{waitingPositionTag}'", true);
+            DebugLog($"🏷️ 할당할 태그 최종 확인 - 작업: '{workPositionTag}'", true);
             
             // 태그 기반으로 작업 위치 찾기
             AssignWorkPositionByTag();
-            AssignWaitingPositionByTag();
         }
         
         /// <summary>
@@ -1304,47 +1348,6 @@ namespace JY
         }
         
         /// <summary>
-        /// 태그로 대기 위치 찾기
-        /// </summary>
-        private void AssignWaitingPositionByTag()
-        {
-            if (string.IsNullOrEmpty(waitingPositionTag))
-            {
-                DebugLog("❌ 대기 위치 태그가 설정되지 않았습니다!", true);
-                return;
-            }
-            
-            DebugLog($"🔍 대기 위치 태그 '{waitingPositionTag}' 검색 시작...", true);
-            
-            GameObject[] waitingPositions = GameObject.FindGameObjectsWithTag(waitingPositionTag);
-            DebugLog($"📋 대기 위치 검색 결과: {waitingPositions.Length}개", true);
-            
-            if (waitingPositions.Length == 0)
-            {
-                DebugLog($"❌ 태그 '{waitingPositionTag}'를 가진 대기 위치를 찾을 수 없습니다! 수동으로 설정하세요.", true);
-                DebugLog($"🔧 대기 위치 태그를 오브젝트에 설정하거나 WorkPositionSetupTool을 사용하세요.", true);
-                // 자동 생성 비활성화 - 사용자가 직접 설정해야 함
-                // CreateWaitingPositionNearWork();
-                return;
-            }
-            
-            // 사용 가능한 대기 위치 찾기
-            foreach (GameObject pos in waitingPositions)
-            {
-                if (!IsPositionOccupiedByOtherAI(pos.transform))
-                {
-                    waitingPosition = pos.transform;
-                    DebugLog($"✅ 대기 위치 할당됨: {pos.name} 위치: {pos.transform.position}", true);
-                    return;
-                }
-            }
-            
-            // 모든 위치가 점유된 경우 첫 번째 위치 사용
-            waitingPosition = waitingPositions[0].transform;
-            DebugLog($"⚠️ 모든 대기 위치가 점유됨. 첫 번째 위치 사용: {waitingPositions[0].name}", true);
-        }
-        
-        /// <summary>
         /// 다른 AI가 해당 위치를 사용하고 있는지 확인
         /// </summary>
         private bool IsPositionOccupiedByOtherAI(Transform position)
@@ -1352,28 +1355,12 @@ namespace JY
             AIEmployee[] allEmployees = FindObjectsByType<AIEmployee>(FindObjectsSortMode.None);
             foreach (var emp in allEmployees)
             {
-                if (emp != this && emp.isHired && 
-                    (emp.workPosition == position || emp.waitingPosition == position))
+                if (emp != this && emp.isHired && emp.workPosition == position)
                 {
                     return true;
                 }
             }
             return false;
-        }
-        
-        /// <summary>
-        /// 작업 위치 근처에 대기 위치 생성
-        /// </summary>
-        private void CreateWaitingPositionNearWork()
-        {
-            if (workPosition == null) return;
-            
-            Vector3 waitingPos = workPosition.position + new Vector3(2f, 0f, 0f);
-            GameObject waitingObj = new GameObject($"WaitingPos_{employeeName}");
-            waitingObj.transform.position = waitingPos;
-            waitingPosition = waitingObj.transform;
-            
-            DebugLog($"작업 위치 근처에 대기 위치 생성: {waitingPos}");
         }
         
         /// <summary>
@@ -1460,18 +1447,6 @@ namespace JY
                 HandleGasDestroyed();
             }
             
-            // 대기 위치 확인
-            if (waitingPosition != null && waitingPosition.gameObject == null)
-            {
-                DebugLog($"⚠️ 대기 위치가 삭제되었습니다. 재할당을 시도합니다.", true);
-                AssignWaitingPositionByTag();
-                
-                // 재할당 실패 시 경고만 출력 (해고하지 않음)
-                if (waitingPosition == null)
-                {
-                    DebugLog($"⚠️ 대기 위치 재할당 실패. 태그 '{waitingPositionTag}'를 확인하세요!", true);
-                }
-            }
         }
         
         /// <summary>
@@ -1569,8 +1544,8 @@ namespace JY
         public string GetAssignedPositionInfo()
         {
             string workInfo = workPosition != null ? workPosition.name : "미할당";
-            string waitingInfo = waitingPosition != null ? waitingPosition.name : "미할당";
-            return $"작업위치: {workInfo}, 대기위치: {waitingInfo}";
+            string spawnInfo = spawnPoint != null ? spawnPoint.name : "미할당";
+            return $"작업위치: {workInfo}, 스폰포인트: {spawnInfo}";
         }
         
         /// <summary>

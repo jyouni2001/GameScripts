@@ -43,6 +43,21 @@ namespace JY
         private Dictionary<GameObject, List<AIEmployee>> counterEmployees = new Dictionary<GameObject, List<AIEmployee>>();
         private Dictionary<GameObject, List<AIEmployee>> kitchenEmployees = new Dictionary<GameObject, List<AIEmployee>>();
         
+        // 디스폰된 직원 정보 (자동 리스폰용)
+        [System.Serializable]
+        private class DespawnedEmployeeInfo
+        {
+            public EmployeeType employeeType;
+            public string employeeName;
+            public int dailyWage;
+            public int workStartHour;
+            public int workEndHour;
+            public string workPositionTag;
+        }
+        private List<DespawnedEmployeeInfo> despawnedEmployees = new List<DespawnedEmployeeInfo>();
+        private TimeSystem timeSystem;
+        private int lastCheckHour = -1;
+        
         // 이벤트
         public static event Action<AIEmployee> OnEmployeeHired;
         public static event Action<AIEmployee> OnEmployeeFired;
@@ -67,6 +82,12 @@ namespace JY
         private void Start()
         {
             InitializeSystem();
+            timeSystem = TimeSystem.Instance;
+        }
+        
+        private void Update()
+        {
+            CheckEmployeeRespawn();
         }
         
         #endregion
@@ -274,6 +295,71 @@ namespace JY
             }
         }
         
+        /// <summary>
+        /// 직원이 디스폰되었을 때 호출 (자동 리스폰을 위해 정보 저장)
+        /// </summary>
+        public void OnEmployeeDespawned(AIEmployee employee)
+        {
+            if (employee == null) return;
+            
+            // 디스폰된 직원 정보 저장 (리스폰용)
+            var employeeType = availableEmployeeTypes.Find(t => t.jobRole == employee.jobRole && t.workPositionTag == employee.workPositionTag);
+            if (employeeType != null)
+            {
+                var info = new DespawnedEmployeeInfo
+                {
+                    employeeType = employeeType,
+                    employeeName = employee.employeeName,
+                    dailyWage = employee.dailyWage,
+                    workStartHour = employee.workStartHour,
+                    workEndHour = employee.workEndHour,
+                    workPositionTag = employee.workPositionTag
+                };
+                despawnedEmployees.Add(info);
+            }
+            
+            // 리스트에서 제거
+            if (hiredEmployees.Contains(employee))
+            {
+                hiredEmployees.Remove(employee);
+            }
+        }
+        
+        /// <summary>
+        /// 근무시간 체크 및 자동 리스폰
+        /// </summary>
+        private void CheckEmployeeRespawn()
+        {
+            if (timeSystem == null || despawnedEmployees.Count == 0) return;
+            
+            int currentHour = timeSystem.CurrentHour;
+            
+            // 매 시간 정각에만 체크
+            if (currentHour != lastCheckHour)
+            {
+                lastCheckHour = currentHour;
+                
+                // 디스폰된 직원 중 근무시간인 직원 찾기
+                for (int i = despawnedEmployees.Count - 1; i >= 0; i--)
+                {
+                    var info = despawnedEmployees[i];
+                    
+                    // 근무시간 체크
+                    if (currentHour >= info.workStartHour && currentHour < info.workEndHour)
+                    {
+                        // 직원 생성 (고용은 이미 되어있는 상태이므로 새로 생성만 함)
+                        AIEmployee newEmployee = CreateEmployee(info.employeeType);
+                        if (newEmployee != null)
+                        {
+                            hiredEmployees.Add(newEmployee);
+                            AssignEmployeeToPosition(newEmployee, info.workPositionTag);
+                            despawnedEmployees.RemoveAt(i);
+                        }
+                    }
+                }
+            }
+        }
+        
         #endregion
         
         #region 비공개 메서드
@@ -299,10 +385,10 @@ namespace JY
                 employee.workStartHour = employeeType.workStartHour;
                 employee.workEndHour = employeeType.workEndHour;
                 employee.workPositionTag = employeeType.workPositionTag;
-                employee.waitingPositionTag = employeeType.waitingPositionTag;
+                employee.spawnPoint = employeeSpawnPoint; // 스폰 포인트 설정
                 
                 // 태그 설정 확인 로그
-                DebugLog($"🏷️ 태그 설정 확인 - 작업: '{employee.workPositionTag}', 대기: '{employee.waitingPositionTag}'");
+                DebugLog($"🏷️ 태그 설정 확인 - 작업: '{employee.workPositionTag}'");
                 
                 // 직원 고용 처리 (isHired는 HireEmployee 내부에서 설정됨)
                 bool hireResult = employee.HireEmployee();
@@ -804,9 +890,6 @@ namespace JY
         [Header("작업 위치")]
         [Tooltip("직원의 작업 위치 태그 (카운터, 요리, 서빙 등)")]
         public string workPositionTag = "카운터";
-        
-        [Tooltip("직원의 대기 위치 태그 (WaitingArea 등)")]
-        public string waitingPositionTag = "WaitingArea";
         
         [Header("비용")]
         public int hiringCost = 500;
