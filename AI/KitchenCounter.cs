@@ -31,6 +31,7 @@ namespace JY
     private Queue<AIAgent> customerQueue = new Queue<AIAgent>();
     private AIAgent currentCustomer;
     private Vector3 counterFront;
+    private Dictionary<AIAgent, float> queueJoinTimes = new Dictionary<AIAgent, float>(); // AI가 대기열에 합류한 시간 추적
         
         // 컴포넌트 참조
         private Collider counterCollider;
@@ -132,6 +133,7 @@ namespace JY
             }
 
             customerQueue.Enqueue(agent);
+            queueJoinTimes[agent] = Time.time; // 대기 시작 시간 기록
             UpdateQueuePositions();
             DebugLog($"AI {agent.gameObject.name}이(가) 주방 대기열에 합류했습니다. (대기 인원: {customerQueue.Count}명)");
             return true;
@@ -151,9 +153,27 @@ namespace JY
                 isProcessingOrder = false;
             }
 
+            // 대기 시간 기록 제거
+            if (queueJoinTimes.ContainsKey(agent))
+            {
+                queueJoinTimes.Remove(agent);
+            }
+
             RemoveFromQueue(customerQueue, agent);
             UpdateQueuePositions();
             DebugLog($"AI {agent.gameObject.name}이(가) 주방 대기열에서 나갔습니다. (남은 인원: {customerQueue.Count}명)");
+        }
+        
+        /// <summary>
+        /// AI가 대기열에서 대기한 시간을 반환합니다.
+        /// </summary>
+        public float GetWaitingTime(AIAgent agent)
+        {
+            if (queueJoinTimes.ContainsKey(agent))
+            {
+                return Time.time - queueJoinTimes[agent];
+            }
+            return 0f;
         }
         
         /// <summary>

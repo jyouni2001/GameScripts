@@ -55,6 +55,7 @@ public class AIAgent : MonoBehaviour
     private bool isSleeping = false;             // 수면 중인지 여부
     private Coroutine sleepingCoroutine;         // 수면 코루틴 참조
     private Animator animator;                   // 애니메이터 컴포넌트
+    private float sleepStartTime = 0f;           // 수면 시작 시간
     
     // 선베드 관련 변수들
     private Transform currentSunbedTransform;    // 현재 사용 중인 선베드 Transform
@@ -70,6 +71,7 @@ public class AIAgent : MonoBehaviour
     private Quaternion preChairRotation;       // 의자 사용 전 회전값 저장
     private bool isEating = false;              // 식사 중인지 여부
     private Coroutine eatingCoroutine;         // 식사 관련 코루틴 참조
+    private float eatingStartTime = 0f;         // 식사 시작 시간
     
     // 주방 카운터 관련 변수들
     private KitchenCounter currentKitchenCounter; // 현재 사용 중인 주방 카운터
@@ -332,14 +334,12 @@ public class AIAgent : MonoBehaviour
     {
         if (timeSystem == null)
         {
-            Debug.LogWarning($"[DetermineBehaviorByTime] AI {gameObject.name}: TimeSystem이 null - 대체 행동 실행");
             FallbackBehavior();
             return;
         }
 
         int hour = timeSystem.CurrentHour;
         int minute = timeSystem.CurrentMinute;
-        Debug.Log($"[DetermineBehaviorByTime] AI {gameObject.name}: 시간별 행동 결정 시작 - 시간: {hour:00}:{minute:00}, 방: {currentRoomIndex}, 수면: {isSleeping}, 상태: {currentState}");
 
         // 17:00에 방 사용 중이 아닌 모든 에이전트 강제 디스폰
         if (hour == 17 && minute == 0)
@@ -351,8 +351,6 @@ public class AIAgent : MonoBehaviour
         if (hour >= 0 && hour < 9)
         {
             // 0:00 ~ 9:00
-            Debug.Log($"[0-9시 행동] AI {gameObject.name}: 현재 시간 {hour:00}:{minute:00}, 방 인덱스: {currentRoomIndex}, 수면 중: {isSleeping}, 현재 상태: {currentState}");
-            
             if (currentRoomIndex != -1)
             {
                 // 0시에 침대로 이동 시작
@@ -363,42 +361,31 @@ public class AIAgent : MonoBehaviour
                         currentBedTransform = bedTransform;
                         preSleepPosition = transform.position;
                         preSleepRotation = transform.rotation;
-                        Debug.Log($"[0-9시 행동] AI {gameObject.name}: 0시 침대 발견, 침대로 이동 시작");
                         TransitionToState(AIState.MovingToBed);
                     }
                     else
                     {
-                        Debug.Log($"[0-9시 행동] AI {gameObject.name}: 0시 침대 없음, 방 배회 시작");
                         TransitionToState(AIState.RoomWandering);
                     }
                 }
                 else if (!isSleeping)
                 {
-                    Debug.Log($"[0-9시 행동] AI {gameObject.name}: 방 내부 배회 중");
                     TransitionToState(AIState.RoomWandering);
-                }
-                else
-                {
-                    Debug.Log($"[0-9시 행동] AI {gameObject.name}: 수면 중");
                 }
             }
             else
             {
-                Debug.Log($"[0-9시 행동] AI {gameObject.name}: 방 없음, 대체 행동 실행");
                 FallbackBehavior();
             }
         }
         else if (hour >= 9 && hour < 11)
         {
             // 9:00 ~ 11:00
-            Debug.Log($"[9-11시 행동] AI {gameObject.name}: 현재 시간 {hour:00}:{minute:00}, 방 인덱스: {currentRoomIndex}, 수면 중: {isSleeping}, 현재 상태: {currentState}, 대기열: {isInQueue}");
-            
             if (currentRoomIndex != -1)
             {
                 // 9시에 수면 중인 AI를 깨움
                 if (hour == 9 && isSleeping)
                 {
-                    Debug.Log($"[9-11시 행동] AI {gameObject.name}: 9시 수면에서 깨어남");
                     WakeUp();
                     // WakeUp()에서 이미 ReportingRoomQueue로 전환하므로 여기서 return
                     return;
@@ -409,18 +396,12 @@ public class AIAgent : MonoBehaviour
                 if (!isSleeping && currentState != AIState.ReportingRoomQueue && 
                     currentState != AIState.ReportingRoom && !isInQueue && !isWaitingForService)
                 {
-                    Debug.Log($"[9-11시 행동] AI {gameObject.name}: 방 사용 완료 보고 시작 (랜덤 딜레이 후)");
                     // 9시에 AI들이 동시에 몰리지 않도록 랜덤 딜레이 추가
                     StartCoroutine(DelayedReportingRoomQueue());
-                }
-                else
-                {
-                    Debug.Log($"[9-11시 행동] AI {gameObject.name}: 이미 보고 진행 중이거나 대기열에 있음");
                 }
             }
             else
             {
-                Debug.Log($"[9-11시 행동] AI {gameObject.name}: 방 없음, 대체 행동 실행");
                 FallbackBehavior();
             }
         }
@@ -599,11 +580,6 @@ public class AIAgent : MonoBehaviour
                isInQueue || isWaitingForService ||
                isScheduledForDespawn; // 11시 디스폰 예정인 AI는 행동 재결정하지 않음
         
-        if (isCritical)
-        {
-            Debug.Log($"[IsInCriticalState] AI {gameObject.name}: 중요 상태임 - 상태: {currentState}, isInQueue: {isInQueue}, isWaitingForService: {isWaitingForService}");
-        }
-        
         return isCritical;
     }
 
@@ -647,35 +623,27 @@ public class AIAgent : MonoBehaviour
 
     private void FallbackBehavior()
     {
-        Debug.Log($"[FallbackBehavior] AI {gameObject.name}: 대체 행동 실행 (counterPosition: {counterPosition != null}, counterManager: {counterManager != null})");
-        
         if (counterPosition == null || counterManager == null)
         {
             float randomValue = Random.value;
-            Debug.Log($"[FallbackBehavior] AI {gameObject.name}: 카운터 없음 - 랜덤 선택 ({randomValue:F2})");
             if (randomValue < 0.5f)
             {
-                Debug.Log($"[FallbackBehavior] AI {gameObject.name}: 배회 선택");
                 TransitionToState(AIState.Wandering);
             }
             else
             {
-                Debug.Log($"[FallbackBehavior] AI {gameObject.name}: 스폰 지점 복귀 선택");
                 TransitionToState(AIState.ReturningToSpawn);
             }
         }
         else
         {
             float randomValue = Random.value;
-            Debug.Log($"[FallbackBehavior] AI {gameObject.name}: 카운터 있음 - 랜덤 선택 ({randomValue:F2})");
             if (randomValue < 0.4f)
             {
-                Debug.Log($"[FallbackBehavior] AI {gameObject.name}: 배회 선택");
                 TransitionToState(AIState.Wandering);
             }
             else
             {
-                Debug.Log($"[FallbackBehavior] AI {gameObject.name}: 카운터로 이동 선택");
                 TransitionToState(AIState.MovingToQueue);
             }
         }
@@ -703,6 +671,9 @@ public class AIAgent : MonoBehaviour
 
         // 주기적으로 오브젝트 유효성 검사 (3초마다)
         CheckObjectValidity();
+
+        // 애니메이션 상태 타임아웃 체크
+        CheckAnimationStateTimeout();
 
         // 애니메이션 파라미터 제어
         if (animator != null)
@@ -742,7 +713,6 @@ public class AIAgent : MonoBehaviour
             // 0시 특별 처리: 방이 있는 AI는 무조건 침대로 이동 (다른 체크보다 먼저)
             if (hour == 0 && minute == 0 && currentRoomIndex != -1 && !isSleeping && lastBehaviorUpdateHour != hour)
             {
-                Debug.Log($"[Update-0시] AI {gameObject.name}: 0시 감지, 방 있음 - 강제로 침대로 이동 (현재 상태: {currentState})");
                 DetermineBehaviorByTime();
                 lastBehaviorUpdateHour = hour;
                 return;
@@ -751,7 +721,6 @@ public class AIAgent : MonoBehaviour
             // 9시에 수면 중인 AI 특별 처리 (다른 체크보다 먼저)
             if (hour == 9 && minute == 0 && isSleeping && lastBehaviorUpdateHour != hour)
             {
-                Debug.Log($"[Update-9시] AI {gameObject.name}: 9시 수면 중 감지 - WakeUp 호출");
                 WakeUp();
                 lastBehaviorUpdateHour = hour;
                 return;
@@ -760,31 +729,25 @@ public class AIAgent : MonoBehaviour
             // 매시간 행동 재결정 (모든 AI 포함)
             if (minute == 0 && hour != lastBehaviorUpdateHour)
             {
-                Debug.Log($"[Update-매시간] AI {gameObject.name}: {hour}시 정각 감지 - 행동 재결정 체크 (상태: {currentState}, 방: {currentRoomIndex})");
-                
                 // 디스폰 예정 AI는 행동 재결정하지 않음
                 if (isScheduledForDespawn)
                 {
-                    Debug.Log($"[Update-매시간] AI {gameObject.name}: 디스폰 예정이므로 행동 재결정 건너뜀");
                     lastBehaviorUpdateHour = hour;
                 }
                 // 중요한 상태가 아닌 경우에만 행동 재결정
                 else if (!IsInCriticalState())
                 {
-                    Debug.Log($"[Update-매시간] AI {gameObject.name}: 중요 상태 아님 - DetermineBehaviorByTime 호출");
                     DetermineBehaviorByTime();
                     lastBehaviorUpdateHour = hour;
                 }
                 // 방 사용 중인 AI도 매시간 내부/외부 배회 재결정
                 else if (IsInRoomRelatedState())
                 {
-                    Debug.Log($"[Update-매시간] AI {gameObject.name}: 방 관련 상태 - RedetermineRoomBehavior 호출");
                     RedetermineRoomBehavior();
                     lastBehaviorUpdateHour = hour;
                 }
                 else
                 {
-                    Debug.Log($"[Update-매시간] AI {gameObject.name}: 중요 상태이므로 행동 재결정 건너뜀 (상태: {currentState})");
                     lastBehaviorUpdateHour = hour;
                 }
             }
@@ -860,32 +823,21 @@ public class AIAgent : MonoBehaviour
     {
         // 0-10초 사이의 랜덤 딜레이
         float delay = Random.Range(0f, 10f);
-        Debug.Log($"[DelayedReportingRoomQueue] AI {gameObject.name}: 방 사용 완료 보고 대기 시작 - 딜레이: {delay:F1}초");
         
         yield return new WaitForSeconds(delay);
-        
-        Debug.Log($"[DelayedReportingRoomQueue] AI {gameObject.name}: 딜레이 완료 - 상태 체크 (방: {currentRoomIndex}, 현재 상태: {currentState}, isInQueue: {isInQueue})");
         
         // 딜레이 중에 상태가 변경되지 않았는지 확인
         if (currentRoomIndex != -1 && currentState != AIState.ReportingRoomQueue && 
             currentState != AIState.ReportingRoom && !isInQueue && !isWaitingForService)
         {
-            Debug.Log($"[DelayedReportingRoomQueue] AI {gameObject.name}: 조건 충족 - ReportingRoomQueue로 전환");
             TransitionToState(AIState.ReportingRoomQueue);
-        }
-        else
-        {
-            Debug.LogWarning($"[DelayedReportingRoomQueue] AI {gameObject.name}: 조건 불충족 - 전환 취소 (방: {currentRoomIndex}, 상태: {currentState}, isInQueue: {isInQueue}, isWaitingForService: {isWaitingForService})");
         }
     }
     
     private IEnumerator QueueBehavior()
     {
-        Debug.Log($"[QueueBehavior] AI {gameObject.name}: QueueBehavior 시작 (현재 상태: {currentState}, 방 인덱스: {currentRoomIndex})");
-        
         if (counterManager == null || counterPosition == null)
         {
-            Debug.LogError($"[QueueBehavior] AI {gameObject.name}: counterManager 또는 counterPosition이 null");
             queueRetryCount = 0; // 재시도 횟수 초기화
             float randomValue = Random.value;
             if (randomValue < 0.5f)
@@ -901,17 +853,13 @@ public class AIAgent : MonoBehaviour
             yield break;
         }
 
-        Debug.Log($"[QueueBehavior] AI {gameObject.name}: 대기열 진입 시도 (재시도 횟수: {queueRetryCount}/{maxQueueRetries})");
-        
         if (!counterManager.TryJoinQueue(this))
         {
             queueRetryCount++;
-            Debug.LogWarning($"[QueueBehavior] AI {gameObject.name}: 대기열 진입 실패 (재시도 횟수: {queueRetryCount}/{maxQueueRetries})");
             
             // 최대 재시도 횟수 초과 시
             if (queueRetryCount >= maxQueueRetries)
             {
-                Debug.LogWarning($"[QueueBehavior] AI {gameObject.name}: 최대 재시도 횟수 초과 - 포기");
                 queueRetryCount = 0;
                 
                 // ReportingRoomQueue 상태였다면 방을 반납하고 배회
@@ -971,7 +919,6 @@ public class AIAgent : MonoBehaviour
         queueRetryCount = 0;
 
         isInQueue = true;
-        Debug.Log($"[QueueBehavior] AI {gameObject.name}: 대기열 진입 성공 - isInQueue=true");
         
         // ⚠️ 여기서 TransitionToState를 호출하면 안됨! 현재 코루틴이 중지되고 재시작되는 무한 루프 발생!
         // 대신 상태만 직접 변경
@@ -979,13 +926,10 @@ public class AIAgent : MonoBehaviour
         {
             currentState = AIState.WaitingInQueue;
             currentDestination = GetStateDescription(AIState.WaitingInQueue);
-            Debug.Log($"[QueueBehavior] AI {gameObject.name}: 상태 직접 변경 → WaitingInQueue");
         }
 
         while (isInQueue)
         {
-            Debug.Log($"[QueueBehavior] AI {gameObject.name}: 대기열 루프 실행 중 (isInQueue={isInQueue})");
-            
             // 17시 체크 - 대기열에서도 즉시 디스폰
             if (timeSystem != null && timeSystem.CurrentHour == 17 && timeSystem.CurrentMinute == 0)
             {
@@ -1020,10 +964,8 @@ public class AIAgent : MonoBehaviour
 
                     if (currentState == AIState.ReportingRoomQueue)
                     {
-                        Debug.Log($"[QueueBehavior] AI {gameObject.name}: 서비스 완료 후 ReportRoomVacancy 호출 시작");
                         // ReportRoomVacancy 코루틴이 완전히 끝날 때까지 대기 (결제 처리 보장)
                         yield return StartCoroutine(ReportRoomVacancy());
-                        Debug.Log($"[QueueBehavior] AI {gameObject.name}: ReportRoomVacancy 완료");
                     }
                     else if (currentRoomIndex != -1)
                     {
@@ -1041,7 +983,6 @@ public class AIAgent : MonoBehaviour
                             var roomManager = FindFirstObjectByType<RoomManager>();
                             if (roomManager != null && room != null)
                             {
-                                Debug.Log($"[방 배정] AI {gameObject.name}: 방 배정 완료, 즉시 결제 정보 등록");
                                 roomManager.ReportRoomUsage(gameObject.name, room);
                             }
                             
@@ -1066,12 +1007,10 @@ public class AIAgent : MonoBehaviour
                     
                     // 서비스 완료 후 대기열에서 나가기
                     isInQueue = false;
-                    Debug.Log($"[QueueBehavior] AI {gameObject.name}: 대기열에서 나감 - isInQueue=false");
                     if (counterManager != null)
                     {
                         counterManager.LeaveQueue(this);
                     }
-                    Debug.Log($"[QueueBehavior] AI {gameObject.name}: QueueBehavior 종료");
                     break;
                 }
             }
@@ -1110,7 +1049,6 @@ public class AIAgent : MonoBehaviour
     private void TransitionToState(AIState newState)
     {
         AIState oldState = currentState;
-        Debug.Log($"[상태 전환] AI {gameObject.name}: {oldState} → {newState} (방 인덱스: {currentRoomIndex})");
         
         CleanupCoroutines();
 
@@ -1125,7 +1063,6 @@ public class AIAgent : MonoBehaviour
             if (agent != null && !agent.enabled)
             {
                 agent.enabled = true;
-                Debug.Log($"[상태 전환] AI {gameObject.name}: NavMeshAgent 재활성화 ({oldState} → {newState})");
             }
         }
 
@@ -1250,43 +1187,24 @@ public class AIAgent : MonoBehaviour
 
     private IEnumerator ReportRoomVacancy()
     {
-        Debug.Log($"[ReportRoomVacancy] AI {gameObject.name}: 시작 (방 인덱스: {currentRoomIndex})");
-        
         TransitionToState(AIState.ReportingRoom);
         int reportingRoomIndex = currentRoomIndex;
 
+        // 1. 먼저 결제 처리 (방 해제 전에 결제 처리해야 함)
+        var roomManager = FindFirstObjectByType<RoomManager>();
+        if (roomManager != null)
+        {
+            int amount = roomManager.ProcessRoomPayment(gameObject.name);
+        }
+
+        // 2. 결제 처리 후 방 해제
         lock (lockObject)
         {
             if (reportingRoomIndex >= 0 && reportingRoomIndex < roomList.Count)
             {
                 roomList[reportingRoomIndex].isOccupied = false;
-                Debug.Log($"[ReportRoomVacancy] AI {gameObject.name}: 방 {reportingRoomIndex} 해제");
                 currentRoomIndex = -1;
             }
-            else
-            {
-                Debug.LogWarning($"[ReportRoomVacancy] AI {gameObject.name}: 유효하지 않은 방 인덱스 {reportingRoomIndex}");
-            }
-        }
-
-        var roomManager = FindFirstObjectByType<RoomManager>();
-        if (roomManager != null)
-        {
-            Debug.Log($"[방 사용 완료] AI {gameObject.name}: 카운터에서 방 결제 처리 시작 (보고 중인 방 인덱스: {reportingRoomIndex})");
-            int amount = roomManager.ProcessRoomPayment(gameObject.name);
-            
-            if (amount > 0)
-            {
-                Debug.Log($"✅ [방 사용 완료 결제] AI {gameObject.name}: 결제 성공! 총 {amount}원 획득");
-            }
-            else
-            {
-                Debug.LogWarning($"⚠️ [방 사용 완료 결제] AI {gameObject.name}: 결제 금액이 0원입니다 (보고한 방: {reportingRoomIndex}). PaymentSystem에 이 AI의 미결제 정보가 없을 가능성 있음 - 방 배정 시 ReportRoomUsage 호출 여부 확인 필요");
-            }
-        }
-        else
-        {
-            Debug.LogError($"❌ [방 사용 완료] AI {gameObject.name}: RoomManager를 찾을 수 없어 결제 처리 실패!");
         }
 
         // 집사 AI 생성 요청 (컴파일 순서 문제로 인해 문자열로 찾기)
@@ -1305,11 +1223,8 @@ public class AIAgent : MonoBehaviour
             }
         }
 
-        Debug.Log($"[ReportRoomVacancy] AI {gameObject.name}: 결제 처리 완료, 다음 행동 결정 (현재 시간: {timeSystem.CurrentHour}시)");
-        
         if (timeSystem.CurrentHour >= 9 && timeSystem.CurrentHour < 11)
         {
-            Debug.Log($"[ReportRoomVacancy] AI {gameObject.name}: 9-11시 - 디스폰 예정으로 배회 시작");
             // 9-11시 체크아웃 후에는 배회하다가 11시에 디스폰 예정
             isScheduledForDespawn = true; // 디스폰 예정 플래그 설정
             TransitionToState(AIState.Wandering);
@@ -1317,7 +1232,6 @@ public class AIAgent : MonoBehaviour
         }
         else
         {
-            Debug.Log($"[ReportRoomVacancy] AI {gameObject.name}: 시간별 행동 결정 호출");
             DetermineBehaviorByTime();
         }
 
@@ -1332,14 +1246,12 @@ public class AIAgent : MonoBehaviour
         if (agent != null && !agent.enabled)
         {
             agent.enabled = true;
-            Debug.Log($"[WanderingBehavior] AI {gameObject.name}: NavMeshAgent 재활성화");
             yield return null; // 한 프레임 대기
         }
 
         // NavMeshAgent가 NavMesh 위에 있는지 확인
         if (agent == null || !agent.isOnNavMesh)
         {
-            Debug.LogWarning($"[WanderingBehavior] AI {gameObject.name}: NavMeshAgent가 NavMesh 위에 없음 - 배회 중단");
             yield break;
         }
 
@@ -1502,7 +1414,6 @@ public class AIAgent : MonoBehaviour
         if (agent != null && !agent.enabled)
         {
             agent.enabled = true;
-            Debug.Log($"[UseWanderingBehavior] AI {gameObject.name}: NavMeshAgent 재활성화");
             yield return null; // 한 프레임 대기
         }
 
@@ -1515,7 +1426,6 @@ public class AIAgent : MonoBehaviour
         // NavMeshAgent가 NavMesh 위에 있는지 확인
         if (agent == null || !agent.isOnNavMesh)
         {
-            Debug.LogWarning($"[UseWanderingBehavior] AI {gameObject.name}: NavMeshAgent가 NavMesh 위에 없음 - 배회 중단");
             DetermineBehaviorByTime();
             yield break;
         }
@@ -1554,19 +1464,15 @@ public class AIAgent : MonoBehaviour
 
     private IEnumerator RoomWanderingBehavior()
     {
-        Debug.Log($"[RoomWanderingBehavior] AI {gameObject.name}: 방 내부 배회 시작 (방 인덱스: {currentRoomIndex})");
-        
         // NavMeshAgent 상태 확인 및 활성화
         if (agent != null && !agent.enabled)
         {
             agent.enabled = true;
-            Debug.Log($"[RoomWanderingBehavior] AI {gameObject.name}: NavMeshAgent 재활성화");
             yield return null; // 한 프레임 대기
         }
         
         if (currentRoomIndex < 0 || currentRoomIndex >= roomList.Count)
         {
-            Debug.LogWarning($"[RoomWanderingBehavior] AI {gameObject.name}: 유효하지 않은 방 인덱스 - 행동 재결정");
             DetermineBehaviorByTime();
             yield break;
         }
@@ -1574,14 +1480,12 @@ public class AIAgent : MonoBehaviour
         // NavMeshAgent가 NavMesh 위에 있는지 확인
         if (agent == null || !agent.isOnNavMesh)
         {
-            Debug.LogWarning($"[RoomWanderingBehavior] AI {gameObject.name}: NavMeshAgent가 NavMesh 위에 없음 - 행동 재결정");
             DetermineBehaviorByTime();
             yield break;
         }
 
         float wanderingTime = Random.Range(15f, 30f);
         float elapsedTime = 0f;
-        Debug.Log($"[RoomWanderingBehavior] AI {gameObject.name}: 배회 시간 설정 - {wanderingTime:F1}초");
 
         while (currentState == AIState.RoomWandering && elapsedTime < wanderingTime && agent.isOnNavMesh)
         {
@@ -1610,7 +1514,6 @@ public class AIAgent : MonoBehaviour
             elapsedTime += waitTime;
         }
 
-        Debug.Log($"[RoomWanderingBehavior] AI {gameObject.name}: 방 내부 배회 종료 - 행동 재결정 (경과 시간: {elapsedTime:F1}초)");
         DetermineBehaviorByTime();
     }
 
@@ -1734,23 +1637,18 @@ public class AIAgent : MonoBehaviour
     {
         bedTransform = null;
         
-        Debug.Log($"[FindBedInCurrentRoom] AI {gameObject.name}: 침대 찾기 시작 (방 인덱스: {currentRoomIndex})");
-        
         if (currentRoomIndex < 0 || currentRoomIndex >= roomList.Count)
         {
-            Debug.LogWarning($"[FindBedInCurrentRoom] AI {gameObject.name}: 유효하지 않은 방 인덱스 ({currentRoomIndex}/{roomList.Count})");
             return false;
         }
 
         var room = roomList[currentRoomIndex];
         if (room == null || room.bedTransform == null)
         {
-            Debug.LogWarning($"[FindBedInCurrentRoom] AI {gameObject.name}: 방이 null이거나 침대가 없음 (방 null: {room == null}, 침대 null: {room?.bedTransform == null})");
             return false;
         }
 
         bedTransform = room.bedTransform;
-        Debug.Log($"[FindBedInCurrentRoom] AI {gameObject.name}: 침대 찾기 성공 - 위치: {bedTransform.position}");
         return true;
     }
 
@@ -1759,18 +1657,14 @@ public class AIAgent : MonoBehaviour
     /// </summary>
     private IEnumerator MoveToBedBehavior()
     {
-        Debug.Log($"[MoveToBedBehavior] AI {gameObject.name}: 침대로 이동 시작");
-        
         if (currentBedTransform == null)
         {
-            Debug.LogWarning($"[MoveToBedBehavior] AI {gameObject.name}: 침대 Transform이 null - 행동 재결정");
             DetermineBehaviorByTime();
             yield break;
         }
 
         // 침대 위치로 이동
         agent.SetDestination(currentBedTransform.position);
-        Debug.Log($"[MoveToBedBehavior] AI {gameObject.name}: 침대 위치로 이동 중 ({currentBedTransform.position})");
 
         // 침대에 도착할 때까지 대기
         float timeout = 10f;
@@ -1780,7 +1674,6 @@ public class AIAgent : MonoBehaviour
         {
             if (timer >= timeout)
             {
-                Debug.LogWarning($"[MoveToBedBehavior] AI {gameObject.name}: 침대 도착 타임아웃 ({timeout}초) - 행동 재결정");
                 DetermineBehaviorByTime();
                 yield break;
             }
@@ -1789,7 +1682,6 @@ public class AIAgent : MonoBehaviour
             yield return null;
         }
 
-        Debug.Log($"[MoveToBedBehavior] AI {gameObject.name}: 침대 도착 완료 - 수면 시작");
         // 침대에 도착했으므로 수면 시작
         StartSleeping();
     }
@@ -1799,29 +1691,24 @@ public class AIAgent : MonoBehaviour
     /// </summary>
     private void StartSleeping()
     {
-        Debug.Log($"[StartSleeping] AI {gameObject.name}: 수면 시작 시도");
-        
         if (currentBedTransform == null)
         {
-            Debug.LogWarning($"[StartSleeping] AI {gameObject.name}: 침대 Transform이 null - 수면 불가");
             return;
         }
 
         // 침대 위치와 각도로 Transform 설정
         transform.position = currentBedTransform.position;
         transform.rotation = currentBedTransform.rotation;
-        Debug.Log($"[StartSleeping] AI {gameObject.name}: 침대 위치로 이동 완료 ({currentBedTransform.position})");
 
         // NavMeshAgent 일시 정지
         if (agent != null)
         {
             agent.enabled = false;
-            Debug.Log($"[StartSleeping] AI {gameObject.name}: NavMeshAgent 비활성화");
         }
 
         // 수면 상태 설정
         isSleeping = true;
-        Debug.Log($"[StartSleeping] AI {gameObject.name}: 수면 상태로 전환 (isSleeping=true)");
+        sleepStartTime = Time.time; // 수면 시작 시간 기록
         TransitionToState(AIState.Sleeping);
     }
 
@@ -1830,11 +1717,8 @@ public class AIAgent : MonoBehaviour
     /// </summary>
     private void WakeUp()
     {
-        Debug.Log($"[WakeUp] AI {gameObject.name}: 기상 시도 (isSleeping={isSleeping})");
-        
         if (!isSleeping)
         {
-            Debug.LogWarning($"[WakeUp] AI {gameObject.name}: 수면 중이 아니므로 기상 불가");
             return;
         }
 
@@ -1842,18 +1726,15 @@ public class AIAgent : MonoBehaviour
         if (agent != null)
         {
             agent.enabled = true;
-            Debug.Log($"[WakeUp] AI {gameObject.name}: NavMeshAgent 활성화");
         }
 
         // 저장된 위치로 복귀
         transform.position = preSleepPosition;
         transform.rotation = preSleepRotation;
-        Debug.Log($"[WakeUp] AI {gameObject.name}: 수면 전 위치로 복귀 ({preSleepPosition})");
 
         // 수면 상태 해제
         isSleeping = false;
         currentBedTransform = null;
-        Debug.Log($"[WakeUp] AI {gameObject.name}: 수면 상태 해제 (isSleeping=false)");
 
         // 9시 기상 시 결제 정보 확인 및 등록 (방 배정 시 등록되지 않은 경우 대비)
         if (currentRoomIndex != -1)
@@ -1862,13 +1743,11 @@ public class AIAgent : MonoBehaviour
             var roomManager = FindFirstObjectByType<RoomManager>();
             if (roomManager != null && room != null)
             {
-                Debug.Log($"[WakeUp] AI {gameObject.name}: 9시 기상, 결제 정보 등록 (방 인덱스: {currentRoomIndex})");
                 roomManager.ReportRoomUsage(gameObject.name, room);
             }
         }
 
         // 방 사용 완료 보고로 전환
-        Debug.Log($"[WakeUp] AI {gameObject.name}: 방 사용 완료 보고를 위해 ReportingRoomQueue로 전환");
         TransitionToState(AIState.ReportingRoomQueue);
     }
     #endregion
@@ -1944,11 +1823,13 @@ public class AIAgent : MonoBehaviour
                     var roomManager = FindFirstObjectByType<RoomManager>();
                     if (roomManager != null && room != null)
                     {
-                        Debug.Log($"[선베드 방 배정] AI {gameObject.name}: 선베드 방 배정 완료, 즉시 결제 정보 등록");
                         roomManager.ReportRoomUsage(gameObject.name, room);
                     }
                     
                     currentSunbedTransform = sunbedTransform;
+                    // 선베드 이동 시작 전에 현재 위치 저장 (침대와 동일하게)
+                    preSunbedPosition = transform.position;
+                    preSunbedRotation = transform.rotation;
                     // 타이머 바로 시작 (이동할 때부터)
                     sunbedCoroutine = StartCoroutine(SunbedUsageTimer());
                     TransitionToState(AIState.MovingToSunbed);
@@ -2082,18 +1963,19 @@ public class AIAgent : MonoBehaviour
             return;
         }
 
-        // 현재 위치 저장 (선베드 위치로 이동하기 전에)
-        preSunbedPosition = transform.position;
-        preSunbedRotation = transform.rotation;
+        // ⚠️ 위치는 TryFindAvailableSunbedRoom()에서 이미 저장됨 (이동 시작 전)
+        // 여기서는 저장하지 않고 선베드 위치로만 이동
         
-        // 선베드 위치와 각도로 Transform 설정
-        transform.position = currentSunbedTransform.position;
+        // 선베드 위치와 각도로 Transform 설정 (z값 +2)
+        Vector3 sunbedPosition = currentSunbedTransform.position;
+        sunbedPosition.z += 1f;  // z값을 2만큼 더함
+        transform.position = sunbedPosition;
         transform.rotation = currentSunbedTransform.rotation;
 
-        // NavMeshAgent는 끄지 않고 이동만 중지
+        // NavMeshAgent 비활성화 (침대와 동일하게)
         if (agent != null)
         {
-            agent.isStopped = true;
+            agent.enabled = false;
         }
 
         // 선베드 사용 상태 설정
@@ -2234,15 +2116,15 @@ public class AIAgent : MonoBehaviour
             animator.SetBool("BedTime", false);
         }
 
-        // 2. 저장된 위치로 복귀
-        transform.position = preSunbedPosition;
-        transform.rotation = preSunbedRotation;
-
-        // 3. NavMeshAgent 이동 재시작
+        // 2. NavMeshAgent 다시 활성화 (침대와 동일하게)
         if (agent != null)
         {
-            agent.isStopped = false;
+            agent.enabled = true;
         }
+
+        // 3. 저장된 위치로 복귀
+        transform.position = preSunbedPosition;
+        transform.rotation = preSunbedRotation;
 
         // 4. 선베드 사용 상태 해제 (안전하게)
         isUsingSunbed = false;
@@ -2318,10 +2200,10 @@ public class AIAgent : MonoBehaviour
             animator.SetBool("BedTime", false);
         }
 
-        // 2. NavMeshAgent 이동 재시작
+        // 2. NavMeshAgent 다시 활성화 (침대와 동일하게)
         if (agent != null)
         {
-            agent.isStopped = false;
+            agent.enabled = true;
         }
 
         // 3. 저장된 위치로 복귀
@@ -2746,6 +2628,7 @@ public class AIAgent : MonoBehaviour
 
         // 식사 상태 설정
         isEating = true;
+        eatingStartTime = Time.time; // 식사 시작 시간 기록
         TransitionToState(AIState.Eating);
         
         // 10초 후 자동으로 식사 종료
@@ -2892,9 +2775,83 @@ public class AIAgent : MonoBehaviour
     }
     #endregion
 
-    #region 오브젝트 유효성 검사
+    #region 오브젝트 유효성 및 타임아웃 검사
     
     private float lastObjectCheckTime = 0f;
+    
+    /// <summary>
+    /// 애니메이션 상태 타임아웃 체크 (너무 오래 특정 상태에 있으면 배회로 전환)
+    /// </summary>
+    private void CheckAnimationStateTimeout()
+    {
+        float currentTime = Time.time;
+        
+        // 수면 상태 타임아웃 (최대 12시간 = 43200초 게임 시간, 실제로는 9시에 WakeUp으로 처리됨)
+        // 9시가 넘었는데도 수면 중이면 강제로 깨우기
+        if (isSleeping && timeSystem != null && timeSystem.CurrentHour >= 9)
+        {
+            WakeUp();
+            return;
+        }
+        
+        // 식사 상태 타임아웃 (최대 30초)
+        if (isEating && currentTime - eatingStartTime > 30f)
+        {
+            // NavMeshAgent 다시 활성화
+            if (agent != null && !agent.enabled)
+            {
+                agent.enabled = true;
+            }
+            
+            // 식사 상태 해제하고 배회로 전환
+            isEating = false;
+            if (eatingCoroutine != null)
+            {
+                StopCoroutine(eatingCoroutine);
+                eatingCoroutine = null;
+            }
+            
+            CleanupKitchenVariables();
+            
+            // 방 유무에 따라 배회 전환
+            if (currentRoomIndex != -1)
+            {
+                TransitionToState(AIState.UseWandering);
+            }
+            else
+            {
+                TransitionToState(AIState.Wandering);
+            }
+            return;
+        }
+        
+        // 주방 카운터 대기 상태 타임아웃 (최대 60초)
+        if (isWaitingAtKitchenCounter && currentState == AIState.WaitingAtKitchenCounter)
+        {
+            // 주방 카운터에서 60초 이상 대기 중이면 강제로 나가기
+            if (currentKitchenCounter != null)
+            {
+                float waitTime = currentKitchenCounter.GetWaitingTime(this);
+                if (waitTime > 60f)
+                {
+                    currentKitchenCounter.LeaveQueue(this);
+                    isWaitingAtKitchenCounter = false;
+                    CleanupKitchenVariables();
+                    
+                    // 방 유무에 따라 배회 전환
+                    if (currentRoomIndex != -1)
+                    {
+                        TransitionToState(AIState.UseWandering);
+                    }
+                    else
+                    {
+                        TransitionToState(AIState.Wandering);
+                    }
+                    return;
+                }
+            }
+        }
+    }
     
     /// <summary>
     /// 주기적으로 오브젝트 유효성 검사 (3초마다)
@@ -2910,28 +2867,24 @@ public class AIAgent : MonoBehaviour
         // 카운터 매니저 체크
         if (counterManager != null && counterManager.gameObject == null)
         {
-            Debug.LogWarning($"[오브젝트 체크] AI {gameObject.name}: CounterManager가 삭제됨 - 대기열에서 나가고 배회");
             HandleCounterDestroyed();
         }
         
         // 카운터 위치 체크
         if (counterPosition != null && counterPosition.gameObject == null)
         {
-            Debug.LogWarning($"[오브젝트 체크] AI {gameObject.name}: Counter 오브젝트가 삭제됨 - 대기열에서 나가고 배회");
             HandleCounterDestroyed();
         }
         
         // 주방 카운터 체크
         if (currentKitchenCounter != null && currentKitchenCounter.gameObject == null)
         {
-            Debug.LogWarning($"[오브젝트 체크] AI {gameObject.name}: KitchenCounter가 삭제됨 - 식사 중단하고 배회");
             HandleKitchenCounterDestroyed();
         }
         
         // 의자 체크 (식사 중일 때)
         if (isEating && currentChairTransform != null && currentChairTransform.gameObject == null)
         {
-            Debug.LogWarning($"[오브젝트 체크] AI {gameObject.name}: 의자가 삭제됨 - 식사 강제 종료하고 배회");
             HandleChairDestroyed();
         }
     }
@@ -2965,6 +2918,12 @@ public class AIAgent : MonoBehaviour
     /// </summary>
     private void HandleKitchenCounterDestroyed()
     {
+        // NavMeshAgent 재활성화 (식사 중이었을 경우)
+        if (agent != null && !agent.enabled)
+        {
+            agent.enabled = true;
+        }
+        
         // 주방 관련 변수 정리
         CleanupKitchenVariables();
         
@@ -2975,7 +2934,7 @@ public class AIAgent : MonoBehaviour
             eatingCoroutine = null;
         }
         
-        // 배회로 전환
+        // 방 유무에 따라 배회로 전환
         if (currentState == AIState.MovingToKitchenCounter || 
             currentState == AIState.WaitingAtKitchenCounter ||
             currentState == AIState.MovingToChair ||
@@ -2998,7 +2957,7 @@ public class AIAgent : MonoBehaviour
     private void HandleChairDestroyed()
     {
         // NavMeshAgent 다시 활성화
-        if (agent != null)
+        if (agent != null && !agent.enabled)
         {
             agent.enabled = true;
         }
@@ -3015,7 +2974,7 @@ public class AIAgent : MonoBehaviour
             eatingCoroutine = null;
         }
         
-        // 배회로 전환
+        // 방 유무에 따라 배회로 전환
         if (currentRoomIndex != -1)
         {
             TransitionToState(AIState.UseWandering);
@@ -3043,17 +3002,13 @@ public class AIAgent : MonoBehaviour
 
     private void CleanupCoroutines()
     {
-        Debug.Log($"[코루틴 정리] AI {gameObject.name}: 모든 코루틴 정리 시작 (wandering: {wanderingCoroutine != null}, queue: {queueCoroutine != null}, roomUse: {roomUseCoroutine != null}, sleeping: {sleepingCoroutine != null})");
-        
         if (wanderingCoroutine != null)
         {
-            Debug.Log($"[코루틴 정리] AI {gameObject.name}: wanderingCoroutine 중지");
             StopCoroutine(wanderingCoroutine);
             wanderingCoroutine = null;
         }
         if (queueCoroutine != null)
         {
-            Debug.Log($"[코루틴 정리] AI {gameObject.name}: queueCoroutine 중지 ⚠️");
             StopCoroutine(queueCoroutine);
             queueCoroutine = null;
         }
@@ -3107,15 +3062,15 @@ public class AIAgent : MonoBehaviour
                 animator.SetBool("BedTime", false);
             }
 
-            // 2. 저장된 위치로 복귀
-            transform.position = preSunbedPosition;
-            transform.rotation = preSunbedRotation;
-
-            // 3. NavMeshAgent 이동 재시작
+            // 2. NavMeshAgent 다시 활성화 (침대와 동일하게)
             if (agent != null)
             {
-                agent.isStopped = false;
+                agent.enabled = true;
             }
+
+            // 3. 저장된 위치로 복귀
+            transform.position = preSunbedPosition;
+            transform.rotation = preSunbedRotation;
 
             // 4. 선베드 사용 상태 해제
             isUsingSunbed = false;

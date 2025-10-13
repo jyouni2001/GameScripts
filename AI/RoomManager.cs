@@ -165,17 +165,29 @@ namespace JY
         /// </summary>
         public void ReportRoomUsage(string aiName, RoomContents room)
         {
-            if (room == null) return;
+            if (room == null)
+            {
+                Debug.LogError($"[ReportRoomUsage] AI {aiName}: room이 null입니다.");
+                return;
+            }
+            
+            Debug.Log($"[ReportRoomUsage] AI {aiName}: 시작 - 방 {room.roomID}, IsRoomUsed={room.IsRoomUsed}, TotalRoomPrice={room.TotalRoomPrice}");
             
             // 방이 이미 사용 중인지 확인
             if (room.IsRoomUsed)
             {
+                Debug.LogWarning($"[ReportRoomUsage] AI {aiName}: 방 {room.roomID}은 이미 사용 중입니다 (중복 호출 방지)");
                 return;
             }
             
             // 방 요금 계산 (방 가격 * 오늘의 배율)
             int basePrice = room.TotalRoomPrice;
-            int finalPrice = Mathf.RoundToInt(room.UseRoom() * priceMultiplier);
+            Debug.Log($"[ReportRoomUsage] AI {aiName}: UseRoom() 호출 전 - 기본 가격: {basePrice}원");
+            
+            int useRoomReturn = room.UseRoom();
+            Debug.Log($"[ReportRoomUsage] AI {aiName}: UseRoom() 반환값: {useRoomReturn}원");
+            
+            int finalPrice = Mathf.RoundToInt(useRoomReturn * priceMultiplier);
             
             // 방 명성도 가져오기
             int roomReputation = room.TotalRoomReputation;
@@ -198,10 +210,12 @@ namespace JY
             // 결제 시스템에 요금과 명성도 추가
             if (paymentSystem != null)
             {
+                Debug.Log($"[ReportRoomUsage] AI {aiName}: PaymentSystem에 결제 추가 - 금액: {finalPrice}원, 명성도: {roomReputation}");
                 paymentSystem.AddPayment(aiName, finalPrice, room.roomID, roomReputation);
             }
             else
             {
+                Debug.LogError($"[ReportRoomUsage] AI {aiName}: PaymentSystem이 null입니다!");
             }
         }
         

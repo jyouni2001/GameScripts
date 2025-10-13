@@ -88,6 +88,8 @@ namespace JY
         /// </summary>
         public void AddPayment(string aiName, int amount, string roomID, int roomReputation)
         {
+            Debug.Log($"[PaymentSystem.AddPayment] 호출됨 - AI: {aiName}, 금액: {amount}원, 방: {roomID}, 명성도: {roomReputation}");
+            
             // 중복 등록 방지: 같은 AI가 같은 방에 대한 미결제 항목이 이미 있으면 추가하지 않음
             bool isDuplicate = paymentQueue.Exists(p => p.aiName == aiName && p.roomID == roomID && !p.isPaid);
             if (isDuplicate)
@@ -97,6 +99,7 @@ namespace JY
             }
             
             paymentQueue.Add(new PaymentInfo(aiName, amount, roomID, roomReputation));
+            Debug.Log($"[PaymentSystem.AddPayment] 결제 정보 추가 완료 - 현재 큐 크기: {paymentQueue.Count}개");
             DebugLog($"새로운 결제 등록: {aiName}, 방 {roomID}, {amount}원, 명성도 {roomReputation}", showPaymentLogs);
         }
         
@@ -105,18 +108,29 @@ namespace JY
         /// </summary>
         public int ProcessPayment(string aiName)
         {
+            Debug.Log($"[PaymentSystem.ProcessPayment] 호출됨 - AI: {aiName}, 현재 전체 큐 크기: {paymentQueue.Count}개");
             DebugLog($"결제 처리 시작 - AI: {aiName}", showPaymentLogs);
             
             int totalAmount = 0;
             List<PaymentInfo> aiPayments = paymentQueue.FindAll(p => p.aiName == aiName && !p.isPaid);
             
+            Debug.Log($"[PaymentSystem.ProcessPayment] AI {aiName}의 미결제 항목: {aiPayments.Count}개");
+            
             if (aiPayments.Count == 0)
             {
                 int alreadyPaidCount = paymentQueue.FindAll(p => p.aiName == aiName && p.isPaid).Count;
                 Debug.LogWarning($"[PaymentSystem] AI {aiName}의 미결제 항목이 0개입니다. 전체 큐: {paymentQueue.Count}개 (이미 결제됨: {alreadyPaidCount}개)");
+                
+                // 전체 큐 내용 출력
+                Debug.Log($"[PaymentSystem] 전체 큐 내용:");
+                foreach (var p in paymentQueue)
+                {
+                    Debug.Log($"  - AI: {p.aiName}, 방: {p.roomID}, 금액: {p.amount}원, 결제됨: {p.isPaid}");
+                }
             }
             else
             {
+                Debug.Log($"[PaymentSystem.ProcessPayment] AI {aiName}의 미결제 항목 {aiPayments.Count}개 발견");
                 DebugLog($"{aiName}의 미결제 항목 {aiPayments.Count}개 발견", showPaymentLogs);
             }
             
@@ -124,6 +138,7 @@ namespace JY
             {
                 totalAmount += payment.amount;
                 payment.isPaid = true;
+                Debug.Log($"[PaymentSystem.ProcessPayment] 결제 처리 중 - AI: {payment.aiName}, 방: {payment.roomID}, 금액: {payment.amount}원, 명성도: {payment.roomReputation}");
                 DebugLog($"결제 처리: {payment.aiName}, 방 {payment.roomID}, {payment.amount}원, 명성도: {payment.roomReputation}", showPaymentLogs);
             }
             
