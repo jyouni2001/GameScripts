@@ -23,4 +23,22 @@ MonoBehaviour:
   bathtubPrice: 0
   bathtubReputation: 0
   bathtubIsFree: 1
-  showPriceLogs: 0
+  weddingFacilityPrice: 200
+  weddingFacilityReputation: 30
+  weddingFacilityIsFree: 0
+  loungeFacilityPrice: 150
+  loungeFacilityReputation: 20
+  loungeFacilityIsFree: 0
+  hallFacilityPrice: 250
+  hallFacilityReputation: 40
+  hallFacilityIsFree: 0
+  saunaFacilityPrice: 300
+  saunaFacilityReputation: 50
+  saunaFacilityIsFree: 0
+  cafeFacilityPrice: 150
+  cafeFacilityReputation: 20
+  cafeFacilityIsFree: 0
+  bathFacilityPrice: 200
+  bathFacilityReputation: 25
+  bathFacilityIsFree: 0
+  showPriceLogs: 1

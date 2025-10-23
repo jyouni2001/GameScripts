@@ -20,14 +20,8 @@ namespace JY
         [Tooltip("카운터당 최대 고용 가능한 직원 수")]
         [SerializeField] private int maxEmployeesPerCounter = 1;
         
-        [Tooltip("식당당 최대 고용 가능한 직원 수 (카운터 + 대기)")]
-        [SerializeField] private int maxEmployeesPerKitchen = 2;
-        
-        [Tooltip("식당 카운터 직원 수 (식당당)")]
-        [SerializeField] private int maxCounterEmployeesPerKitchen = 1;
-        
-        [Tooltip("식당 대기 직원 수 (식당당)")]
-        [SerializeField] private int maxWaitingEmployeesPerKitchen = 1;
+        [Tooltip("식당당 최대 고용 가능한 직원 수 (주방 1개당 1명)")]
+        [SerializeField] private int maxEmployeesPerKitchen = 1;
         
         [Header("고용 가능한 직원 타입")]
         [SerializeField] private List<EmployeeType> availableEmployeeTypes = new List<EmployeeType>();
@@ -479,19 +473,18 @@ namespace JY
         {
             DebugLog($"조건 체크: {employeeType.typeName}, workPositionTag: '{employeeType.workPositionTag}'");
             
-            // 카운터 직원인 경우 (리셉션 태그 포함)
-            if (employeeType.workPositionTag == "WorkPosition_Reception" ||
-                employeeType.jobRole == "카운터")
+            // 카운터 직원인 경우
+            if (employeeType.workPositionTag == "WorkPosition_Reception")
             {
                 bool result = CanHireCounterEmployee();
                 DebugLog($"카운터 직원 조건 체크 결과: {result}");
                 return result;
             }
-            // 식당 직원인 경우
-            else if (employeeType.workPositionTag == "요리" || employeeType.workPositionTag == "서빙")
+            // 주방 직원인 경우
+            else if (employeeType.workPositionTag == "WorkPosition_Kitchen")
             {
-                bool result = CanHireKitchenEmployee(employeeType.workPositionTag);
-                DebugLog($"식당 직원 조건 체크 결과: {result}");
+                bool result = CanHireKitchenEmployee();
+                DebugLog($"주방 직원 조건 체크 결과: {result}");
                 return result;
             }
             
@@ -538,49 +531,30 @@ namespace JY
         }
         
         /// <summary>
-        /// 식당 직원 고용 가능 여부 확인
+        /// 주방 직원 고용 가능 여부 확인 (주방 1개당 1명 제한)
         /// </summary>
-        private bool CanHireKitchenEmployee(string workPositionTag)
+        private bool CanHireKitchenEmployee()
         {
-            // 식당 개수 확인
+            // Kitchen 태그로 주방 개수 확인
             GameObject[] kitchens = GameObject.FindGameObjectsWithTag("Kitchen");
             int kitchenCount = kitchens.Length;
-            DebugLog($"식당 개수: {kitchenCount}개");
             
             if (kitchenCount == 0)
             {
-                DebugLog("식당이 없습니다! 식당 직원을 고용할 수 없습니다.");
+                DebugLog("주방이 없습니다! 주방 직원을 고용할 수 없습니다.");
                 return false;
             }
             
             int currentKitchenEmployees = GetCurrentKitchenEmployeeCount();
-            int currentCounterEmployees = GetCurrentKitchenCounterEmployeeCount();
-            int currentWaitingEmployees = GetCurrentKitchenWaitingEmployeeCount();
+            int maxKitchenEmployees = kitchenCount * maxEmployeesPerKitchen; // 주방 1개당 1명
             
-            DebugLog($"현재 식당 직원: 전체 {currentKitchenEmployees}명, 카운터 {currentCounterEmployees}명, 대기 {currentWaitingEmployees}명");
-            
-            // 전체 식당 직원 수 제한
-            if (currentKitchenEmployees >= (kitchenCount * maxEmployeesPerKitchen))
+            if (currentKitchenEmployees >= maxKitchenEmployees)
             {
-                DebugLog($"식당 직원 전체 고용 제한: 현재 {currentKitchenEmployees}명, 최대 {kitchenCount * maxEmployeesPerKitchen}명");
+                DebugLog($"❌ 주방 직원 고용 제한: 현재 {currentKitchenEmployees}명, 최대 {maxKitchenEmployees}명 (주방 1개당 1명)");
                 return false;
             }
             
-            // 카운터 직원 제한
-            if (workPositionTag == "요리" && currentCounterEmployees >= (kitchenCount * maxCounterEmployeesPerKitchen))
-            {
-                DebugLog($"식당 카운터 직원 고용 제한: 현재 {currentCounterEmployees}명, 최대 {kitchenCount * maxCounterEmployeesPerKitchen}명");
-                return false;
-            }
-            
-            // 대기 직원 제한
-            if (workPositionTag == "서빙" && currentWaitingEmployees >= (kitchenCount * maxWaitingEmployeesPerKitchen))
-            {
-                DebugLog($"식당 대기 직원 고용 제한: 현재 {currentWaitingEmployees}명, 최대 {kitchenCount * maxWaitingEmployeesPerKitchen}명");
-                return false;
-            }
-            
-            DebugLog($"{workPositionTag} 직원 고용 가능!");
+            DebugLog($"✅ 주방 직원 고용 가능! (현재: {currentKitchenEmployees}/{maxKitchenEmployees}명, 주방 {kitchenCount}개)");
             return true;
         }
         
@@ -643,13 +617,9 @@ namespace JY
             int kitchenCount = GetKitchenCount();
             int currentCounterEmployees = GetCurrentCounterEmployeeCount();
             int currentKitchenEmployees = GetCurrentKitchenEmployeeCount();
-            int currentKitchenCounterEmployees = GetCurrentKitchenCounterEmployeeCount();
-            int currentKitchenWaitingEmployees = GetCurrentKitchenWaitingEmployeeCount();
             
-            return $"카운터: {currentCounterEmployees}/{counterCount * maxEmployeesPerCounter}명, " +
-                   $"식당 전체: {currentKitchenEmployees}/{kitchenCount * maxEmployeesPerKitchen}명, " +
-                   $"식당 카운터: {currentKitchenCounterEmployees}/{kitchenCount * maxCounterEmployeesPerKitchen}명, \n" +
-                   $"식당 대기: {currentKitchenWaitingEmployees}/{kitchenCount * maxWaitingEmployeesPerKitchen}명";
+            return $"카운터: {currentCounterEmployees}/{counterCount * maxEmployeesPerCounter}명 (카운터 {counterCount}개)\n" +
+                   $"주방: {currentKitchenEmployees}/{kitchenCount * maxEmployeesPerKitchen}명 (주방 {kitchenCount}개, 1개당 1명)";
         }
         
         /// <summary>
@@ -667,42 +637,20 @@ namespace JY
                 
                 int currentCounterEmployees = GetCurrentCounterEmployeeCount();
                 int maxCounterEmployees = counters.Length * maxEmployeesPerCounter;
-                return $"카운터 직원이 가득 참 ({currentCounterEmployees}/{maxCounterEmployees}명)";
+                return $"카운터 직원이 가득 참 ({currentCounterEmployees}/{maxCounterEmployees}명, 카운터 1개당 1명)";
             }
             else if (employeeType.workPositionTag == "요리" || employeeType.workPositionTag == "서빙")
             {
                 GameObject[] kitchens = GameObject.FindGameObjectsWithTag("Kitchen");
                 if (kitchens.Length == 0)
                 {
-                    return "식당이 없습니다. 식당을 먼저 배치해주세요.";
+                    return "주방이 없습니다. 주방을 먼저 배치해주세요.";
                 }
                 
                 int currentKitchenEmployees = GetCurrentKitchenEmployeeCount();
                 int maxKitchenEmployees = kitchens.Length * maxEmployeesPerKitchen;
                 
-                if (currentKitchenEmployees >= maxKitchenEmployees)
-                {
-                    return $"식당 직원이 가득 참 ({currentKitchenEmployees}/{maxKitchenEmployees}명)";
-                }
-                
-                if (employeeType.workPositionTag == "요리")
-                {
-                    int currentCounterEmployees = GetCurrentKitchenCounterEmployeeCount();
-                    int maxCounterEmployees = kitchens.Length * maxCounterEmployeesPerKitchen;
-                    if (currentCounterEmployees >= maxCounterEmployees)
-                    {
-                        return $"식당 카운터 직원이 가득 참 ({currentCounterEmployees}/{maxCounterEmployees}명)";
-                    }
-                }
-                else if (employeeType.workPositionTag == "서빙")
-                {
-                    int currentWaitingEmployees = GetCurrentKitchenWaitingEmployeeCount();
-                    int maxWaitingEmployees = kitchens.Length * maxWaitingEmployeesPerKitchen;
-                    if (currentWaitingEmployees >= maxWaitingEmployees)
-                    {
-                        return $"식당 대기 직원이 가득 참 ({currentWaitingEmployees}/{maxWaitingEmployees}명)";
-                    }
-                }
+                return $"주방 직원이 가득 참 ({currentKitchenEmployees}/{maxKitchenEmployees}명, 주방 1개당 1명)";
             }
             
             return "알 수 없는 제한 사유";
@@ -713,11 +661,14 @@ namespace JY
         /// </summary>
         private void AssignEmployeeToPosition(AIEmployee employee, string workPositionTag)
         {
-            if (workPositionTag == "WorkPosition_Reception" ||
-                employee.jobRole == "카운터")
+            DebugLog($"직원 배정 시작: {employee.employeeName}, workPositionTag: '{workPositionTag}'");
+            
+            // 카운터 직원 배정
+            if (workPositionTag == "WorkPosition_Reception")
             {
-                // 사용 가능한 카운터 찾기
                 GameObject[] counters = GameObject.FindGameObjectsWithTag("Counter");
+                DebugLog($"카운터 직원 배정 시도: 총 {counters.Length}개 카운터 발견");
+                
                 foreach (GameObject counter in counters)
                 {
                     if (!counterEmployees.ContainsKey(counter))
@@ -728,27 +679,32 @@ namespace JY
                     if (counterEmployees[counter].Count < maxEmployeesPerCounter)
                     {
                         counterEmployees[counter].Add(employee);
-                        employee.assignedCounter = counter; // AIEmployee에 assignedCounter 필드 추가 필요
+                        employee.assignedCounter = counter;
                         
                         // 카운터 매니저에 직원 배정 알림
                         CounterManager counterManager = counter.GetComponent<CounterManager>();
                         if (counterManager != null)
                         {
                             counterManager.AssignEmployee(employee);
-                            DebugLog($"직원 '{employee.employeeName}'이(가) 카운터 '{counter.name}'과 CounterManager에 배정되었습니다.");
-                        }
-                        else
-                        {
-                            DebugLog($"직원 '{employee.employeeName}'이(가) 카운터 '{counter.name}'에 배정되었습니다 (CounterManager 없음).");
+                            DebugLog($"✅ 직원 '{employee.employeeName}'이(가) 카운터 '{counter.name}'에 배정되었습니다.");
                         }
                         return;
                     }
                 }
+                DebugLog($"❌ 모든 카운터가 가득 찼습니다.");
             }
-            else if (workPositionTag == "요리" || workPositionTag == "서빙")
+            // 주방 직원 배정
+            else if (workPositionTag == "WorkPosition_Kitchen")
             {
-                // 사용 가능한 식당 찾기
                 GameObject[] kitchens = GameObject.FindGameObjectsWithTag("Kitchen");
+                DebugLog($"주방 직원 배정 시도: 총 {kitchens.Length}개 주방 발견");
+                
+                if (kitchens.Length == 0)
+                {
+                    DebugLog($"❌ Kitchen 태그를 가진 오브젝트가 없습니다!");
+                    return;
+                }
+                
                 foreach (GameObject kitchen in kitchens)
                 {
                     if (!kitchenEmployees.ContainsKey(kitchen))
@@ -756,18 +712,16 @@ namespace JY
                         kitchenEmployees[kitchen] = new List<AIEmployee>();
                     }
                     
-                    // 해당 타입의 직원 수 확인
-                    int currentTypeCount = kitchenEmployees[kitchen].Count(emp => emp.workPositionTag == workPositionTag);
-                    int maxForType = (workPositionTag == "요리") ? maxCounterEmployeesPerKitchen : maxWaitingEmployeesPerKitchen;
-                    
-                    if (currentTypeCount < maxForType)
+                    // 주방 1개당 직원 1명 제한
+                    if (kitchenEmployees[kitchen].Count < maxEmployeesPerKitchen)
                     {
                         kitchenEmployees[kitchen].Add(employee);
-                        employee.assignedKitchen = kitchen; // AIEmployee에 assignedKitchen 필드 추가 필요
-                        DebugLog($"직원 '{employee.employeeName}'이(가) 식당 '{kitchen.name}'에 배정되었습니다.");
+                        employee.assignedKitchen = kitchen;
+                        DebugLog($"✅ 직원 '{employee.employeeName}'이(가) 주방 '{kitchen.name}'에 배정되었습니다 ({kitchenEmployees[kitchen].Count}/{maxEmployeesPerKitchen}명).");
                         return;
                     }
                 }
+                DebugLog($"❌ 모든 주방이 가득 찼습니다.");
             }
         }
         

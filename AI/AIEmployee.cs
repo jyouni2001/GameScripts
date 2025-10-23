@@ -292,16 +292,17 @@ namespace JY
                 transform.rotation = gasPosition.rotation;
                 DebugLog($"인덕션 위치로 이동 완료 - 위치: {gasPosition.position}, 회전: {gasPosition.rotation.eulerAngles}", true);
                 
-                // 요리 시작 - 웍 오브젝트 활성화
+                // 요리 애니메이션 재생 (웍 활성화 전에 CleanUpAnimation 호출!)
+                CleanUpAnimation();
+                PlayAnimationBool(workAnimationTrigger, true);
+                
+                // 요리 시작 - 웍 오브젝트 활성화 (CleanUpAnimation 이후에!)
                 if (wokObject != null)
                 {
                     wokObject.SetActive(true);
                     DebugLog("🥘 웍 오브젝트 활성화", true);
                 }
                 
-                // 요리 애니메이션 재생
-                CleanUpAnimation();
-                PlayAnimationBool(workAnimationTrigger, true);
                 DebugLog("요리 중...", true);
                 yield return new WaitForSeconds(3f);
                 
@@ -319,9 +320,9 @@ namespace JY
                     DebugLog("접시 오브젝트 활성화 (완성된 음식)", true);
                 }
 
-                // 4. 원래 작업 위치로 복귀
-                DebugLog("작업 위치로 복귀 (접시 들고)", true);
-                CleanUpAnimation();
+                // 4. 원래 작업 위치로 복귀 (Picking 애니메이션)
+                DebugLog("작업 위치로 복귀 (접시 들고 - Picking 애니메이션)", true);
+                PlayAnimationBool("Picking", true);
                 SetState(EmployeeState.Moving);
                 MoveToPosition(workPosition);
                 
@@ -346,7 +347,8 @@ namespace JY
                     DebugLog("접시 오브젝트 비활성화 (음식 전달 완료)", true);
                 }
                 
-                // 대기 상태로 전환
+                // 음식 전달 완료 - 모든 애니메이션 끄기
+                PlayAnimationBool("Picking", false);
                 CleanUpAnimation(); // 모든 애니메이션 끄기 → 자동으로 Idle
                 SetState(EmployeeState.Working);
             }

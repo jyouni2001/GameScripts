@@ -85,6 +85,36 @@ public class FacilityPriceConfigSO : ScriptableObject
     [Tooltip("사우나 무료 제공 여부 (false면 유료)")]
     public bool saunaFacilityIsFree = false;
     
+    [Header("카페 설정")]
+    [Tooltip("카페 사용료 (방 유무 상관없이 유료)")]
+    public int cafeFacilityPrice = 150;
+    
+    [Tooltip("카페 명성도")]
+    public int cafeFacilityReputation = 20;
+    
+    [Tooltip("카페 무료 제공 여부 (false면 유료)")]
+    public bool cafeFacilityIsFree = false;
+    
+    [Header("Bath 설정")]
+    [Tooltip("Bath 사용료 (방 유무 상관없이 유료)")]
+    public int bathFacilityPrice = 200;
+    
+    [Tooltip("Bath 명성도")]
+    public int bathFacilityReputation = 25;
+    
+    [Tooltip("Bath 무료 제공 여부 (false면 유료)")]
+    public bool bathFacilityIsFree = false;
+    
+    [Header("Hos(고급식당) 설정")]
+    [Tooltip("Hos(고급식당) 사용료 (방 유무 상관없이 유료)")]
+    public int hosFacilityPrice = 300;
+    
+    [Tooltip("Hos(고급식당) 명성도")]
+    public int hosFacilityReputation = 30;
+    
+    [Tooltip("Hos(고급식당) 무료 제공 여부 (false면 유료)")]
+    public bool hosFacilityIsFree = false;
+    
     [Header("디버그")]
     [Tooltip("가격 정보 로그 출력")]
     public bool showPriceLogs = true;
@@ -175,6 +205,39 @@ public class FacilityPriceConfigSO : ScriptableObject
     }
     
     /// <summary>
+    /// 카페 최종 가격 계산
+    /// </summary>
+    public int GetCafeFacilityFinalPrice()
+    {
+        if (cafeFacilityIsFree)
+            return 0;
+        
+        return cafeFacilityPrice;
+    }
+    
+    /// <summary>
+    /// Bath 최종 가격 계산
+    /// </summary>
+    public int GetBathFacilityFinalPrice()
+    {
+        if (bathFacilityIsFree)
+            return 0;
+        
+        return bathFacilityPrice;
+    }
+    
+    /// <summary>
+    /// Hos(고급식당) 최종 가격 계산
+    /// </summary>
+    public int GetHosFacilityFinalPrice()
+    {
+        if (hosFacilityIsFree)
+            return 0;
+        
+        return hosFacilityPrice;
+    }
+    
+    /// <summary>
     /// 설정 유효성 검사
     /// </summary>
     private void OnValidate()
@@ -188,6 +251,9 @@ public class FacilityPriceConfigSO : ScriptableObject
         loungeFacilityPrice = Mathf.Max(0, loungeFacilityPrice);
         hallFacilityPrice = Mathf.Max(0, hallFacilityPrice);
         saunaFacilityPrice = Mathf.Max(0, saunaFacilityPrice);
+        cafeFacilityPrice = Mathf.Max(0, cafeFacilityPrice);
+        bathFacilityPrice = Mathf.Max(0, bathFacilityPrice);
+        hosFacilityPrice = Mathf.Max(0, hosFacilityPrice);
         
         sunbedReputation = Mathf.Max(0, sunbedReputation);
         restaurantReputation = Mathf.Max(0, restaurantReputation);
@@ -197,6 +263,9 @@ public class FacilityPriceConfigSO : ScriptableObject
         loungeFacilityReputation = Mathf.Max(0, loungeFacilityReputation);
         hallFacilityReputation = Mathf.Max(0, hallFacilityReputation);
         saunaFacilityReputation = Mathf.Max(0, saunaFacilityReputation);
+        cafeFacilityReputation = Mathf.Max(0, cafeFacilityReputation);
+        hosFacilityReputation = Mathf.Max(0, hosFacilityReputation);
+        bathFacilityReputation = Mathf.Max(0, bathFacilityReputation);
     }
 }
 

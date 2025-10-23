@@ -156,6 +156,61 @@ public class AIAgent : MonoBehaviour
     private static readonly object saunaSitPointLock = new object();
     private static readonly object saunaDownPointLock = new object();
     
+    // 카페 관련 변수들
+    private Transform currentCafeTransform;      // 현재 사용 중인 카페 Transform
+    private Vector3 preCafePosition;             // 카페 사용 전 위치 저장
+    private Quaternion preCafeRotation;          // 카페 사용 전 회전값 저장
+    private bool isUsingCafe = false;            // 카페 사용 중인지 여부
+    private Coroutine cafeCoroutine;             // 카페 관련 코루틴 참조
+    
+    // 카페 점유 관리를 위한 static 딕셔너리
+    private static Dictionary<Transform, AIAgent> occupiedCafeFacilities = new Dictionary<Transform, AIAgent>();
+    private static readonly object cafeLock = new object();
+    
+    // 카페 포인트 점유 관리 (static)
+    private static Dictionary<Transform, AIAgent> occupiedCafePoints = new Dictionary<Transform, AIAgent>();
+    private static readonly object cafePointLock = new object();
+    
+    // 현재 사용 중인 카페 Point Transform
+    private Transform currentCafePoint;
+    
+    // Bath 관련 변수들
+    private Transform currentBathTransform;      // 현재 사용 중인 Bath Transform
+    private Vector3 preBathPosition;             // Bath 사용 전 위치 저장
+    private Quaternion preBathRotation;          // Bath 사용 전 회전값 저장
+    private bool isUsingBath = false;            // Bath 사용 중인지 여부
+    private Coroutine bathCoroutine;             // Bath 관련 코루틴 참조
+    private Transform currentBathPoint;          // BathSitPoint 또는 BathDownPoint
+    private bool isBathSitting = false;          // Sitting 애니메이션 사용 여부 (false면 BedTime)
+    
+    // Bath 점유 관리를 위한 static 딕셔너리
+    private static Dictionary<Transform, AIAgent> occupiedBathFacilities = new Dictionary<Transform, AIAgent>();
+    private static readonly object bathLock = new object();
+    
+    // Bath 포인트 점유 관리 (static)
+    private static Dictionary<Transform, AIAgent> occupiedBathSitPoints = new Dictionary<Transform, AIAgent>();
+    private static Dictionary<Transform, AIAgent> occupiedBathDownPoints = new Dictionary<Transform, AIAgent>();
+    private static readonly object bathSitPointLock = new object();
+    private static readonly object bathDownPointLock = new object();
+    
+    // Hos(고급식당) 관련 변수들
+    private Transform currentHosTransform;       // 현재 사용 중인 Hos Transform
+    private Vector3 preHosPosition;              // Hos 사용 전 위치 저장
+    private Quaternion preHosRotation;           // Hos 사용 전 회전값 저장
+    private bool isUsingHos = false;             // Hos 사용 중인지 여부
+    private Coroutine hosCoroutine;              // Hos 관련 코루틴 참조
+    private Transform currentHosPoint;           // 현재 사용 중인 HosPoint Transform
+    private ChairPoint currentHosChairPoint;     // 현재 사용 중인 ChairPoint (테이블 관리)
+    private GameObject currentHosUtensil;        // 현재 사용 중인 식사 도구 (Fork 또는 Spoon)
+    
+    // Hos 점유 관리를 위한 static 딕셔너리
+    private static Dictionary<Transform, AIAgent> occupiedHosFacilities = new Dictionary<Transform, AIAgent>();
+    private static readonly object hosLock = new object();
+    
+    // Hos 포인트 점유 관리 (static)
+    private static Dictionary<Transform, AIAgent> occupiedHosPoints = new Dictionary<Transform, AIAgent>();
+    private static readonly object hosPointLock = new object();
+    
     // 복원 플래그
     private bool isBeingRestored = false;
     
@@ -284,7 +339,13 @@ public class AIAgent : MonoBehaviour
         MovingToHall,        // 연회장으로 이동
         UsingHall,           // 연회장 사용 중
         MovingToSauna,       // 사우나로 이동
-        UsingSauna           // 사우나 사용 중
+        UsingSauna,          // 사우나 사용 중
+        MovingToCafe,        // 카페로 이동
+        UsingCafe,           // 카페 사용 중
+        MovingToBath,        // Bath로 이동
+        UsingBath,           // Bath 사용 중
+        MovingToHos,         // 고급식당으로 이동
+        UsingHos             // 고급식당 사용 중
     }
     #endregion
 
@@ -312,6 +373,13 @@ public class AIAgent : MonoBehaviour
         occupiedHallPoints = new Dictionary<Transform, AIAgent>();
         occupiedSaunaSitPoints = new Dictionary<Transform, AIAgent>();
         occupiedSaunaDownPoints = new Dictionary<Transform, AIAgent>();
+        occupiedCafeFacilities = new Dictionary<Transform, AIAgent>();
+        occupiedCafePoints = new Dictionary<Transform, AIAgent>();
+        occupiedBathFacilities = new Dictionary<Transform, AIAgent>();
+        occupiedBathSitPoints = new Dictionary<Transform, AIAgent>();
+        occupiedBathDownPoints = new Dictionary<Transform, AIAgent>();
+        occupiedHosFacilities = new Dictionary<Transform, AIAgent>();
+        occupiedHosPoints = new Dictionary<Transform, AIAgent>();
     }
 
     void Start()
@@ -498,6 +566,9 @@ public class AIAgent : MonoBehaviour
         int hour = timeSystem.CurrentHour;
         int minute = timeSystem.CurrentMinute;
 
+        // 정각마다 이전 행동 정리 (애니메이션, 오브젝트, 점유 해제 등)
+        CleanupCurrentActivity();
+
         // 17:00 이후 방 없는 AI는 강제 디스폰
         // currentRoomIndex == -1이면 방 없는 AI
         if (hour >= 17 && currentRoomIndex == -1)
@@ -614,32 +685,50 @@ public class AIAgent : MonoBehaviour
                 // ========== 방 없는 AI (11:00~17:00만 존재) ==========
                 if (hour >= 11 && hour <= 16)
                 {
-                    // 운동 시설 사용 중이면 다음 정각에 종료
+                    // 시설 사용 중이면 다음 정각에 종료
                     if (isUsingHealth)
                     {
                         FinishUsingHealth();
                         return; // 이번 정각은 종료하는 것으로 처리
                     }
-                    
-                    // 예식장 사용 중이면 다음 정각에 종료
                     if (isUsingWedding)
                     {
                         FinishUsingWedding();
                         return; // 이번 정각은 종료하는 것으로 처리
                     }
-                    
-                    // 12시, 18시는 무조건 식사!
-                    if (hour == 12 || hour == 18)
+                    if (isUsingLounge)
                     {
-                        if (!TryFindAvailableKitchen())
-                        {
-                            TransitionToState(AIState.Wandering);
-                        }
+                        FinishUsingLounge();
+                        return;
                     }
-                    else
+                    if (isUsingHall)
                     {
-                        // 그 외 시간 확률 행동
-                        float randomValue = Random.value;
+                        FinishUsingHall();
+                        return;
+                    }
+                    if (isUsingSauna)
+                    {
+                        FinishUsingSauna();
+                        return;
+                    }
+                    if (isUsingCafe)
+                    {
+                        FinishUsingCafe();
+                        return;
+                    }
+                    if (isUsingBath)
+                    {
+                        FinishUsingBath();
+                        return;
+                    }
+                    if (isUsingHos)
+                    {
+                        FinishUsingHos();
+                        return;
+                    }
+                    
+                    // 확률 행동
+                    float randomValue = Random.value;
                         
                         // 25% 식사
                         if (randomValue < 0.25f)
@@ -655,10 +744,13 @@ public class AIAgent : MonoBehaviour
                             // 시설 존재 여부 확인
                             bool sunbedAvailable = hour >= 11 && hour <= 15; // 선베드는 11~15시만
                             bool healthExists = GameObject.FindGameObjectsWithTag("Health").Length > 0;
-                            bool weddingExists = hour >= 11 && hour <= 20 && GameObject.FindGameObjectsWithTag("Wedding").Length > 0;
-                            bool loungeExists = hour >= 11 && hour <= 20 && GameObject.FindGameObjectsWithTag("Lounge").Length > 0;
-                            bool hallExists = hour >= 11 && hour <= 20 && GameObject.FindGameObjectsWithTag("Hall").Length > 0;
-                            bool saunaExists = hour >= 11 && hour <= 20 && GameObject.FindGameObjectsWithTag("Sauna").Length > 0;
+                            bool weddingExists = hour >= 11 && hour <= 22 && GameObject.FindGameObjectsWithTag("Wedding").Length > 0;
+                            bool loungeExists = hour >= 11 && hour <= 22 && GameObject.FindGameObjectsWithTag("Lounge").Length > 0;
+                            bool hallExists = hour >= 11 && hour <= 22 && GameObject.FindGameObjectsWithTag("Hall").Length > 0;
+                            bool saunaExists = hour >= 11 && hour <= 22 && GameObject.FindGameObjectsWithTag("Sauna").Length > 0;
+                            bool cafeExists = hour >= 11 && hour <= 22 && GameObject.FindGameObjectsWithTag("Cafe").Length > 0;
+                            bool bathExists = hour >= 11 && hour <= 22 && GameObject.FindGameObjectsWithTag("Bath").Length > 0;
+                            bool hosExists = hour >= 11 && hour <= 22 && GameObject.FindGameObjectsWithTag("Hos").Length > 0;
                             
                             // 시설 개수 카운트
                             int facilityCount = 0;
@@ -668,6 +760,9 @@ public class AIAgent : MonoBehaviour
                             if (loungeExists) facilityCount++;
                             if (hallExists) facilityCount++;
                             if (saunaExists) facilityCount++;
+                            if (cafeExists) facilityCount++;
+                            if (bathExists) facilityCount++;
+                            if (hosExists) facilityCount++;
                             
                             // 시설이 하나도 없으면 배회
                             if (facilityCount == 0)
@@ -697,7 +792,7 @@ public class AIAgent : MonoBehaviour
                                         TransitionToState(AIState.Wandering);
                                     }
                                 }
-                                // 예식장 (11~20시, 유료)
+                                // 예식장 (11~22시, 유료)
                                 else if (weddingExists && facilityRandom < probabilityPerFacility * ++currentIndex)
                                 {
                                     if (!TryFindAvailableWedding())
@@ -705,7 +800,7 @@ public class AIAgent : MonoBehaviour
                                         TransitionToState(AIState.Wandering);
                                     }
                                 }
-                                // 라운지 (11~20시, 유료)
+                                // 라운지 (11~22시, 유료)
                                 else if (loungeExists && facilityRandom < probabilityPerFacility * ++currentIndex)
                                 {
                                     if (!TryFindAvailableLounge())
@@ -713,7 +808,7 @@ public class AIAgent : MonoBehaviour
                                         TransitionToState(AIState.Wandering);
                                     }
                                 }
-                                // 연회장 (11~20시, 유료)
+                                // 연회장 (11~22시, 유료)
                                 else if (hallExists && facilityRandom < probabilityPerFacility * ++currentIndex)
                                 {
                                     if (!TryFindAvailableHall())
@@ -721,10 +816,34 @@ public class AIAgent : MonoBehaviour
                                         TransitionToState(AIState.Wandering);
                                     }
                                 }
-                                // 사우나 (11~20시, 유료)
+                                // 사우나 (11~22시, 유료)
                                 else if (saunaExists && facilityRandom < probabilityPerFacility * ++currentIndex)
                                 {
                                     if (!TryFindAvailableSauna())
+                                    {
+                                        TransitionToState(AIState.Wandering);
+                                    }
+                                }
+                                // 카페 (11~22시, 유료)
+                                else if (cafeExists && facilityRandom < probabilityPerFacility * ++currentIndex)
+                                {
+                                    if (!TryFindAvailableCafe())
+                                    {
+                                        TransitionToState(AIState.Wandering);
+                                    }
+                                }
+                                // Bath (11~22시, 유료)
+                                else if (bathExists && facilityRandom < probabilityPerFacility * ++currentIndex)
+                                {
+                                    if (!TryFindAvailableBath())
+                                    {
+                                        TransitionToState(AIState.Wandering);
+                                    }
+                                }
+                                // Hos 고급식당 (11~22시, 유료)
+                                else if (hosExists && facilityRandom < probabilityPerFacility * ++currentIndex)
+                                {
+                                    if (!TryFindAvailableHos())
                                     {
                                         TransitionToState(AIState.Wandering);
                                     }
@@ -736,16 +855,15 @@ public class AIAgent : MonoBehaviour
                                 }
                             }
                         }
-                        // 5% 퇴장
-                        else if (randomValue < 0.75f) // 0.70 + 0.05 = 0.75
-                        {
-                            TransitionToState(AIState.ReturningToSpawn);
-                        }
-                        // 25% 배회
-                        else // 0.75 ~ 1.00 = 25%
-                        {
-                            TransitionToState(AIState.Wandering);
-                        }
+                    // 5% 퇴장
+                    else if (randomValue < 0.75f) // 0.70 + 0.05 = 0.75
+                    {
+                        TransitionToState(AIState.ReturningToSpawn);
+                    }
+                    // 25% 배회
+                    else // 0.75 ~ 1.00 = 25%
+                    {
+                        TransitionToState(AIState.Wandering);
                     }
                 }
                 else
@@ -758,8 +876,90 @@ public class AIAgent : MonoBehaviour
             {
                 // ========== 투숙객 (11:00~24:00) ==========
                 
-                // 12시, 18시는 무조건 식사!
-                if (hour == 12 || hour == 18)
+                // 확률 행동
+                float randomValue = Random.value;
+                
+                // 낮잠 중이면 다음 정각에 자연스럽게 깨우기
+                if (isNapping && isSleeping)
+                {
+                    WakeUpFromNap();
+                    return; // 이번 정각은 깨어나는 것으로 처리, 다음 정각에 다시 행동 결정
+                }
+                
+                // 운동 시설 사용 중이면 다음 정각에 종료
+                if (isUsingHealth)
+                {
+                    FinishUsingHealth();
+                    return; // 이번 정각은 종료하는 것으로 처리, 다음 정각에 다시 행동 결정
+                }
+                
+                // 예식장 사용 중이면 다음 정각에 종료
+                if (isUsingWedding)
+                {
+                    FinishUsingWedding();
+                    return; // 이번 정각은 종료하는 것으로 처리, 다음 정각에 다시 행동 결정
+                }
+                
+                // 라운지 사용 중이면 다음 정각에 종료
+                if (isUsingLounge)
+                {
+                    FinishUsingLounge();
+                    return; // 이번 정각은 종료하는 것으로 처리, 다음 정각에 다시 행동 결정
+                }
+                
+                // 연회장 사용 중이면 다음 정각에 종료
+                if (isUsingHall)
+                {
+                    FinishUsingHall();
+                    return; // 이번 정각은 종료하는 것으로 처리, 다음 정각에 다시 행동 결정
+                }
+                
+                // 사우나 사용 중이면 다음 정각에 종료
+                if (isUsingSauna)
+                {
+                    FinishUsingSauna();
+                    return; // 이번 정각은 종료하는 것으로 처리, 다음 정각에 다시 행동 결정
+                }
+                
+                // 카페 사용 중이면 다음 정각에 종료
+                if (isUsingCafe)
+                {
+                    FinishUsingCafe();
+                    return; // 이번 정각은 종료하는 것으로 처리, 다음 정각에 다시 행동 결정
+                }
+                
+                // Bath 사용 중이면 다음 정각에 종료
+                if (isUsingBath)
+                {
+                    FinishUsingBath();
+                    return; // 이번 정각은 종료하는 것으로 처리, 다음 정각에 다시 행동 결정
+                }
+                
+                // Hos 사용 중이면 다음 정각에 종료
+                if (isUsingHos)
+                {
+                    FinishUsingHos();
+                    return; // 이번 정각은 종료하는 것으로 처리, 다음 정각에 다시 행동 결정
+                }
+                
+                // 5% 낮잠 (짧은 수면)
+                if (randomValue < 0.05f)
+                {
+                    if (FindBedInCurrentRoom(out Transform bedTransform))
+                    {
+                        currentBedTransform = bedTransform;
+                        preSleepPosition = transform.position;
+                        preSleepRotation = transform.rotation;
+                        isNapping = true; // 낮잠 플래그 설정
+                        TransitionToState(AIState.MovingToBed);
+                    }
+                    else
+                    {
+                        TransitionToState(AIState.RoomWandering);
+                    }
+                }
+                // 30% 식사
+                else if (randomValue < 0.35f)
                 {
                     if (!TryFindAvailableKitchen())
                     {
@@ -774,75 +974,52 @@ public class AIAgent : MonoBehaviour
                         }
                     }
                 }
-                else
+                // 35% 시설 이용 (욕조 + 선베드 + 운동 시설 + 예식장 + 라운지 + 연회장 + 사우나)
+                else if (randomValue < 0.70f)
                 {
-                    // 12시, 18시가 아닐 때 확률 행동
-                    float randomValue = Random.value;
+                    // 라운지/연회장/사우나/카페/Bath/Hos 존재 여부 확인 (11~22시만)
+                    bool loungeExists = false;
+                    bool hallExists = false;
+                    bool saunaExists = false;
+                    bool cafeExists = false;
+                    bool bathExists = false;
+                    bool hosExists = false;
                     
-                    // 낮잠 중이면 다음 정각에 자연스럽게 깨우기
-                    if (isNapping && isSleeping)
+                    if (hour >= 11 && hour <= 22)
                     {
-                        WakeUpFromNap();
-                        return; // 이번 정각은 깨어나는 것으로 처리, 다음 정각에 다시 행동 결정
+                        loungeExists = GameObject.FindGameObjectsWithTag("Lounge").Length > 0;
+                        hallExists = GameObject.FindGameObjectsWithTag("Hall").Length > 0;
+                        saunaExists = GameObject.FindGameObjectsWithTag("Sauna").Length > 0;
+                        cafeExists = GameObject.FindGameObjectsWithTag("Cafe").Length > 0;
+                        bathExists = GameObject.FindGameObjectsWithTag("Bath").Length > 0;
+                        hosExists = GameObject.FindGameObjectsWithTag("Hos").Length > 0;
                     }
                     
-                    // 운동 시설 사용 중이면 다음 정각에 종료
-                    if (isUsingHealth)
-                    {
-                        FinishUsingHealth();
-                        return; // 이번 정각은 종료하는 것으로 처리, 다음 정각에 다시 행동 결정
-                    }
+                    // 시설 개수에 따라 확률 조정
+                    int facilityCount = 4; // 기본: 욕조, 선베드, 운동 시설, 예식장
+                    if (loungeExists) facilityCount++;
+                    if (hallExists) facilityCount++;
+                    if (saunaExists) facilityCount++;
+                    if (cafeExists) facilityCount++;
+                    if (bathExists) facilityCount++;
+                    if (hosExists) facilityCount++;
                     
-                    // 예식장 사용 중이면 다음 정각에 종료
-                    if (isUsingWedding)
-                    {
-                        FinishUsingWedding();
-                        return; // 이번 정각은 종료하는 것으로 처리, 다음 정각에 다시 행동 결정
-                    }
+                    float facilityRandom = Random.value;
+                    float probabilityPerFacility = 1.0f / facilityCount;
                     
-                    // 라운지 사용 중이면 다음 정각에 종료
-                    if (isUsingLounge)
+                    // 욕조
+                    if (facilityRandom < probabilityPerFacility)
                     {
-                        FinishUsingLounge();
-                        return; // 이번 정각은 종료하는 것으로 처리, 다음 정각에 다시 행동 결정
-                    }
-                    
-                    // 연회장 사용 중이면 다음 정각에 종료
-                    if (isUsingHall)
-                    {
-                        FinishUsingHall();
-                        return; // 이번 정각은 종료하는 것으로 처리, 다음 정각에 다시 행동 결정
-                    }
-                    
-                    // 사우나 사용 중이면 다음 정각에 종료
-                    if (isUsingSauna)
-                    {
-                        FinishUsingSauna();
-                        return; // 이번 정각은 종료하는 것으로 처리, 다음 정각에 다시 행동 결정
-                    }
-                    
-                    // 5% 낮잠 (짧은 수면)
-                    if (randomValue < 0.05f)
-                    {
-                        if (FindBedInCurrentRoom(out Transform bedTransform))
+                        if (FindBathtubInCurrentRoom(out Transform bathtubTransform))
                         {
-                            currentBedTransform = bedTransform;
-                            preSleepPosition = transform.position;
-                            preSleepRotation = transform.rotation;
-                            isNapping = true; // 낮잠 플래그 설정
-                            TransitionToState(AIState.MovingToBed);
+                            currentBathtubTransform = bathtubTransform;
+                            preBathtubPosition = transform.position;
+                            preBathtubRotation = transform.rotation;
+                            TransitionToState(AIState.MovingToBathtub);
                         }
                         else
                         {
-                            TransitionToState(AIState.RoomWandering);
-                        }
-                    }
-                    // 30% 식사
-                    else if (randomValue < 0.35f)
-                    {
-                        if (!TryFindAvailableKitchen())
-                        {
-                            // 식당이 없으면 배회
+                            // 욕조 없으면 배회
                             if (Random.value < 0.5f)
                             {
                                 TransitionToState(AIState.UseWandering);
@@ -853,43 +1030,14 @@ public class AIAgent : MonoBehaviour
                             }
                         }
                     }
-                    // 35% 시설 이용 (욕조 + 선베드 + 운동 시설 + 예식장 + 라운지 + 연회장 + 사우나)
-                    else if (randomValue < 0.70f)
+                    // 선베드 (11~15시만)
+                    else if (facilityRandom < probabilityPerFacility * 2)
                     {
-                        // 라운지/연회장/사우나 존재 여부 확인 (11~20시만)
-                        bool loungeExists = false;
-                        bool hallExists = false;
-                        bool saunaExists = false;
-                        
-                        if (hour >= 11 && hour <= 20)
+                        if (hour >= 11 && hour <= 15)
                         {
-                            loungeExists = GameObject.FindGameObjectsWithTag("Lounge").Length > 0;
-                            hallExists = GameObject.FindGameObjectsWithTag("Hall").Length > 0;
-                            saunaExists = GameObject.FindGameObjectsWithTag("Sauna").Length > 0;
-                        }
-                        
-                        // 시설 개수에 따라 확률 조정
-                        int facilityCount = 4; // 기본: 욕조, 선베드, 운동 시설, 예식장
-                        if (loungeExists) facilityCount++;
-                        if (hallExists) facilityCount++;
-                        if (saunaExists) facilityCount++;
-                        
-                        float facilityRandom = Random.value;
-                        float probabilityPerFacility = 1.0f / facilityCount;
-                        
-                        // 욕조
-                        if (facilityRandom < probabilityPerFacility)
-                        {
-                            if (FindBathtubInCurrentRoom(out Transform bathtubTransform))
+                            if (!TryFindSunbedInMyRoom())
                             {
-                                currentBathtubTransform = bathtubTransform;
-                                preBathtubPosition = transform.position;
-                                preBathtubRotation = transform.rotation;
-                                TransitionToState(AIState.MovingToBathtub);
-                            }
-                            else
-                            {
-                                // 욕조 없으면 배회
+                                // 선베드 없으면 배회
                                 if (Random.value < 0.5f)
                                 {
                                     TransitionToState(AIState.UseWandering);
@@ -900,170 +1048,9 @@ public class AIAgent : MonoBehaviour
                                 }
                             }
                         }
-                        // 선베드 (11~15시만)
-                        else if (facilityRandom < probabilityPerFacility * 2)
-                        {
-                            if (hour >= 11 && hour <= 15)
-                            {
-                                if (!TryFindSunbedInMyRoom())
-                                {
-                                    // 선베드 없으면 배회
-                                    if (Random.value < 0.5f)
-                                    {
-                                        TransitionToState(AIState.UseWandering);
-                                    }
-                                    else
-                                    {
-                                        TransitionToState(AIState.RoomWandering);
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                // 선베드 시간 아니면 배회
-                                if (Random.value < 0.5f)
-                                {
-                                    TransitionToState(AIState.UseWandering);
-                                }
-                                else
-                                {
-                                    TransitionToState(AIState.RoomWandering);
-                                }
-                            }
-                        }
-                        // 운동 시설
-                        else if (facilityRandom < probabilityPerFacility * 3)
-                        {
-                            if (FindHealthInCurrentRoom(out Transform healthTransform))
-                            {
-                                currentHealthTransform = healthTransform;
-                                preHealthPosition = transform.position;
-                                preHealthRotation = transform.rotation;
-                                TransitionToState(AIState.MovingToHealth);
-                            }
-                            else
-                            {
-                                // 운동 시설 없으면 배회
-                                if (Random.value < 0.5f)
-                                {
-                                    TransitionToState(AIState.UseWandering);
-                                }
-                                else
-                                {
-                                    TransitionToState(AIState.RoomWandering);
-                                }
-                            }
-                        }
-                        // 예식장 (11~20시만)
-                        else if (facilityRandom < probabilityPerFacility * 4)
-                        {
-                            if (hour >= 11 && hour <= 20)
-                            {
-                                if (!FindWeddingInCurrentRoom(out Transform weddingTransform))
-                                {
-                                    // 예식장 없으면 배회
-                                    if (Random.value < 0.5f)
-                                    {
-                                        TransitionToState(AIState.UseWandering);
-                                    }
-                                    else
-                                    {
-                                        TransitionToState(AIState.RoomWandering);
-                                    }
-                                }
-                                else
-                                {
-                                    currentWeddingTransform = weddingTransform;
-                                    preWeddingPosition = transform.position;
-                                    preWeddingRotation = transform.rotation;
-                                    TransitionToState(AIState.MovingToWedding);
-                                }
-                            }
-                            else
-                            {
-                                // 예식장 시간 아니면 배회
-                                if (Random.value < 0.5f)
-                                {
-                                    TransitionToState(AIState.UseWandering);
-                                }
-                                else
-                                {
-                                    TransitionToState(AIState.RoomWandering);
-                                }
-                            }
-                        }
-                        // 라운지 (11~20시만, 존재할 때만)
-                        else if (loungeExists && facilityRandom < probabilityPerFacility * 5)
-                        {
-                            if (!FindLoungeInCurrentRoom(out Transform loungeTransform))
-                            {
-                                // 라운지 없으면 배회
-                                if (Random.value < 0.5f)
-                                {
-                                    TransitionToState(AIState.UseWandering);
-                                }
-                                else
-                                {
-                                    TransitionToState(AIState.RoomWandering);
-                                }
-                            }
-                            else
-                            {
-                                currentLoungeTransform = loungeTransform;
-                                preLoungePosition = transform.position;
-                                preLoungeRotation = transform.rotation;
-                                TransitionToState(AIState.MovingToLounge);
-                            }
-                        }
-                        // 연회장 (11~20시만, 존재할 때만)
-                        else if (hallExists && facilityRandom < probabilityPerFacility * 6)
-                        {
-                            if (!FindHallInCurrentRoom(out Transform hallTransform))
-                            {
-                                // 연회장 없으면 배회
-                                if (Random.value < 0.5f)
-                                {
-                                    TransitionToState(AIState.UseWandering);
-                                }
-                                else
-                                {
-                                    TransitionToState(AIState.RoomWandering);
-                                }
-                            }
-                            else
-                            {
-                                currentHallTransform = hallTransform;
-                                preHallPosition = transform.position;
-                                preHallRotation = transform.rotation;
-                                TransitionToState(AIState.MovingToHall);
-                            }
-                        }
-                        // 사우나 (11~20시만, 존재할 때만)
-                        else if (saunaExists && facilityRandom < probabilityPerFacility * 7)
-                        {
-                            if (!FindSaunaInCurrentRoom(out Transform saunaTransform))
-                            {
-                                // 사우나 없으면 배회
-                                if (Random.value < 0.5f)
-                                {
-                                    TransitionToState(AIState.UseWandering);
-                                }
-                                else
-                                {
-                                    TransitionToState(AIState.RoomWandering);
-                                }
-                            }
-                            else
-                            {
-                                currentSaunaTransform = saunaTransform;
-                                preSaunaPosition = transform.position;
-                                preSaunaRotation = transform.rotation;
-                                TransitionToState(AIState.MovingToSauna);
-                            }
-                        }
-                        // 나머지는 배회
                         else
                         {
+                            // 선베드 시간 아니면 배회
                             if (Random.value < 0.5f)
                             {
                                 TransitionToState(AIState.UseWandering);
@@ -1074,10 +1061,208 @@ public class AIAgent : MonoBehaviour
                             }
                         }
                     }
-                    // 30% 배회
+                    // 운동 시설
+                    else if (facilityRandom < probabilityPerFacility * 3)
+                    {
+                        if (FindHealthInCurrentRoom(out Transform healthTransform))
+                        {
+                            currentHealthTransform = healthTransform;
+                            preHealthPosition = transform.position;
+                            preHealthRotation = transform.rotation;
+                            TransitionToState(AIState.MovingToHealth);
+                        }
+                        else
+                        {
+                            // 운동 시설 없으면 배회
+                            if (Random.value < 0.5f)
+                            {
+                                TransitionToState(AIState.UseWandering);
+                            }
+                            else
+                            {
+                                TransitionToState(AIState.RoomWandering);
+                            }
+                        }
+                    }
+                    // 예식장 (11~22시만)
+                    else if (facilityRandom < probabilityPerFacility * 4)
+                    {
+                        if (hour >= 11 && hour <= 22)
+                        {
+                            if (!FindWeddingInCurrentRoom(out Transform weddingTransform))
+                            {
+                                // 예식장 없으면 배회
+                                if (Random.value < 0.5f)
+                                {
+                                    TransitionToState(AIState.UseWandering);
+                                }
+                                else
+                                {
+                                    TransitionToState(AIState.RoomWandering);
+                                }
+                            }
+                            else
+                            {
+                                currentWeddingTransform = weddingTransform;
+                                preWeddingPosition = transform.position;
+                                preWeddingRotation = transform.rotation;
+                                TransitionToState(AIState.MovingToWedding);
+                            }
+                        }
+                        else
+                        {
+                            // 예식장 시간 아니면 배회
+                            if (Random.value < 0.5f)
+                            {
+                                TransitionToState(AIState.UseWandering);
+                            }
+                            else
+                            {
+                                TransitionToState(AIState.RoomWandering);
+                            }
+                        }
+                    }
+                    // 라운지 (11~22시만, 존재할 때만)
+                    else if (loungeExists && facilityRandom < probabilityPerFacility * 5)
+                    {
+                        if (!FindLoungeInCurrentRoom(out Transform loungeTransform))
+                        {
+                            // 라운지 없으면 배회
+                            if (Random.value < 0.5f)
+                            {
+                                TransitionToState(AIState.UseWandering);
+                            }
+                            else
+                            {
+                                TransitionToState(AIState.RoomWandering);
+                            }
+                        }
+                        else
+                        {
+                            currentLoungeTransform = loungeTransform;
+                            preLoungePosition = transform.position;
+                            preLoungeRotation = transform.rotation;
+                            TransitionToState(AIState.MovingToLounge);
+                        }
+                    }
+                    // 연회장 (11~22시만, 존재할 때만)
+                    else if (hallExists && facilityRandom < probabilityPerFacility * 6)
+                    {
+                        if (!FindHallInCurrentRoom(out Transform hallTransform))
+                        {
+                            // 연회장 없으면 배회
+                            if (Random.value < 0.5f)
+                            {
+                                TransitionToState(AIState.UseWandering);
+                            }
+                            else
+                            {
+                                TransitionToState(AIState.RoomWandering);
+                            }
+                        }
+                        else
+                        {
+                            currentHallTransform = hallTransform;
+                            preHallPosition = transform.position;
+                            preHallRotation = transform.rotation;
+                            TransitionToState(AIState.MovingToHall);
+                        }
+                    }
+                    // 사우나 (11~22시만, 존재할 때만)
+                    else if (saunaExists && facilityRandom < probabilityPerFacility * 7)
+                    {
+                        if (!FindSaunaInCurrentRoom(out Transform saunaTransform))
+                        {
+                            // 사우나 없으면 배회
+                            if (Random.value < 0.5f)
+                            {
+                                TransitionToState(AIState.UseWandering);
+                            }
+                            else
+                            {
+                                TransitionToState(AIState.RoomWandering);
+                            }
+                        }
+                        else
+                        {
+                            currentSaunaTransform = saunaTransform;
+                            preSaunaPosition = transform.position;
+                            preSaunaRotation = transform.rotation;
+                            TransitionToState(AIState.MovingToSauna);
+                        }
+                    }
+                    // 카페 (11~22시만, 존재할 때만)
+                    else if (cafeExists && facilityRandom < probabilityPerFacility * 8)
+                    {
+                        if (!FindCafeInCurrentRoom(out Transform cafeTransform))
+                        {
+                            // 카페 없으면 배회
+                            if (Random.value < 0.5f)
+                            {
+                                TransitionToState(AIState.UseWandering);
+                            }
+                            else
+                            {
+                                TransitionToState(AIState.RoomWandering);
+                            }
+                        }
+                        else
+                        {
+                            currentCafeTransform = cafeTransform;
+                            preCafePosition = transform.position;
+                            preCafeRotation = transform.rotation;
+                            TransitionToState(AIState.MovingToCafe);
+                        }
+                    }
+                    // Bath (11~22시만, 존재할 때만)
+                    else if (bathExists && facilityRandom < probabilityPerFacility * 9)
+                    {
+                        if (!FindBathInCurrentRoom(out Transform bathTransform))
+                        {
+                            // Bath 없으면 배회
+                            if (Random.value < 0.5f)
+                            {
+                                TransitionToState(AIState.UseWandering);
+                            }
+                            else
+                            {
+                                TransitionToState(AIState.RoomWandering);
+                            }
+                        }
+                        else
+                        {
+                            currentBathTransform = bathTransform;
+                            preBathPosition = transform.position;
+                            preBathRotation = transform.rotation;
+                            TransitionToState(AIState.MovingToBath);
+                        }
+                    }
+                    // Hos 고급식당 (11~22시만, 존재할 때만)
+                    else if (hosExists && facilityRandom < probabilityPerFacility * 10)
+                    {
+                        if (!FindHosInCurrentRoom(out Transform hosTransform))
+                        {
+                            // Hos 없으면 배회
+                            if (Random.value < 0.5f)
+                            {
+                                TransitionToState(AIState.UseWandering);
+                            }
+                            else
+                            {
+                                TransitionToState(AIState.RoomWandering);
+                            }
+                        }
+                        else
+                        {
+                            currentHosTransform = hosTransform;
+                            preHosPosition = transform.position;
+                            preHosRotation = transform.rotation;
+                            TransitionToState(AIState.MovingToHos);
+                        }
+                    }
+                    // 나머지는 배회
                     else
                     {
-                        // 30% 중 절반씩 분배
                         if (Random.value < 0.5f)
                         {
                             TransitionToState(AIState.UseWandering);
@@ -1086,6 +1271,19 @@ public class AIAgent : MonoBehaviour
                         {
                             TransitionToState(AIState.RoomWandering);
                         }
+                    }
+                }
+                // 30% 배회
+                else
+                {
+                    // 30% 중 절반씩 분배
+                    if (Random.value < 0.5f)
+                    {
+                        TransitionToState(AIState.UseWandering);
+                    }
+                    else
+                    {
+                        TransitionToState(AIState.RoomWandering);
                     }
                 }
             }
@@ -1343,6 +1541,102 @@ public class AIAgent : MonoBehaviour
             isUsingSauna = false;
             isSaunaSitting = false;
             currentSaunaTransform = null;
+        }
+
+        // 카페 사용 중이면 강제 종료
+        if (isUsingCafe)
+        {
+            if (cafeCoroutine != null)
+            {
+                StopCoroutine(cafeCoroutine);
+                cafeCoroutine = null;
+            }
+            
+            if (animator != null)
+            {
+                animator.SetBool("Sitting", false);
+            }
+            
+            if (agent != null && !agent.enabled)
+            {
+                agent.enabled = true;
+            }
+            
+            // CafePoint 점유 해제
+            if (currentCafePoint != null)
+            {
+                lock (cafePointLock)
+                {
+                    if (occupiedCafePoints.ContainsKey(currentCafePoint) && occupiedCafePoints[currentCafePoint] == this)
+                    {
+                        occupiedCafePoints.Remove(currentCafePoint);
+                        Debug.Log($"[CafePoint 점유 해제] {gameObject.name}: 17시 강제 퇴장으로 점유 해제 (점유 중: {occupiedCafePoints.Count}개)");
+                    }
+                }
+                currentCafePoint = null;
+            }
+            
+            isUsingCafe = false;
+            currentCafeTransform = null;
+        }
+
+        // Bath 사용 중이면 강제 종료
+        if (isUsingBath)
+        {
+            if (bathCoroutine != null)
+            {
+                StopCoroutine(bathCoroutine);
+                bathCoroutine = null;
+            }
+            
+            if (animator != null)
+            {
+                if (isBathSitting)
+                {
+                    animator.SetBool("Sitting", false);
+                }
+                else
+                {
+                    animator.SetBool("BedTime", false);
+                }
+            }
+            
+            if (agent != null && !agent.enabled)
+            {
+                agent.enabled = true;
+            }
+            
+            // BathPoint 점유 해제
+            if (currentBathPoint != null)
+            {
+                if (isBathSitting)
+                {
+                    lock (bathSitPointLock)
+                    {
+                        if (occupiedBathSitPoints.ContainsKey(currentBathPoint) && occupiedBathSitPoints[currentBathPoint] == this)
+                        {
+                            occupiedBathSitPoints.Remove(currentBathPoint);
+                            Debug.Log($"[BathSitPoint 점유 해제] {gameObject.name}: 17시 강제 퇴장으로 점유 해제 (점유 중: {occupiedBathSitPoints.Count}개)");
+                        }
+                    }
+                }
+                else
+                {
+                    lock (bathDownPointLock)
+                    {
+                        if (occupiedBathDownPoints.ContainsKey(currentBathPoint) && occupiedBathDownPoints[currentBathPoint] == this)
+                        {
+                            occupiedBathDownPoints.Remove(currentBathPoint);
+                            Debug.Log($"[BathDownPoint 점유 해제] {gameObject.name}: 17시 강제 퇴장으로 점유 해제 (점유 중: {occupiedBathDownPoints.Count}개)");
+                        }
+                    }
+                }
+                currentBathPoint = null;
+            }
+            
+            isUsingBath = false;
+            isBathSitting = false;
+            currentBathTransform = null;
         }
 
         // 주방 카운터 대기 중이거나 식사 중인 AI는 강제로 종료 후 퇴장
@@ -1685,6 +1979,24 @@ public class AIAgent : MonoBehaviour
                 break;
             case AIState.UsingSauna:
                 // 사우나 사용 중 - 별도 처리 불필요
+                break;
+            case AIState.MovingToCafe:
+                // 카페로 이동 중 - MoveToCafeBehavior 코루틴에서 처리
+                break;
+            case AIState.UsingCafe:
+                // 카페 사용 중 - 별도 처리 불필요
+                break;
+            case AIState.MovingToBath:
+                // Bath로 이동 중 - MoveToBathBehavior 코루틴에서 처리
+                break;
+            case AIState.UsingBath:
+                // Bath 사용 중 - 별도 처리 불필요
+                break;
+            case AIState.MovingToHos:
+                // Hos로 이동 중 - MoveToHosBehavior 코루틴에서 처리
+                break;
+            case AIState.UsingHos:
+                // Hos 사용 중 - 별도 처리 불필요
                 break;
             case AIState.MovingToKitchenCounter:
                 // 주방 카운터로 이동 중 - MoveToKitchenCounterBehavior 코루틴에서 처리
@@ -2070,6 +2382,33 @@ public class AIAgent : MonoBehaviour
             case AIState.UsingSauna:
                 // 사우나 사용 상태 - 별도의 코루틴 불필요
                 break;
+            case AIState.MovingToCafe:
+                if (currentCafeTransform != null)
+                {
+                    cafeCoroutine = StartCoroutine(MoveToCafeBehavior());
+                }
+                break;
+            case AIState.UsingCafe:
+                // 카페 사용 상태 - 별도의 코루틴 불필요
+                break;
+            case AIState.MovingToBath:
+                if (currentBathTransform != null)
+                {
+                    bathCoroutine = StartCoroutine(MoveToBathBehavior());
+                }
+                break;
+            case AIState.UsingBath:
+                // Bath 사용 상태 - 별도의 코루틴 불필요
+                break;
+            case AIState.MovingToHos:
+                if (currentHosTransform != null)
+                {
+                    hosCoroutine = StartCoroutine(MoveToHosBehavior());
+                }
+                break;
+            case AIState.UsingHos:
+                // Hos 사용 상태 - 별도의 코루틴 불필요
+                break;
             case AIState.MovingToKitchenCounter:
                 if (currentKitchenCounter != null)
                 {
@@ -2133,6 +2472,10 @@ public class AIAgent : MonoBehaviour
             AIState.UsingHall => currentRoomIndex != -1 ? $"룸 {currentRoomIndex + 1}번 연회장 사용 중" : "연회장 사용 중 (방 없는 AI)",
             AIState.MovingToSauna => currentRoomIndex != -1 ? $"룸 {currentRoomIndex + 1}번 사우나로 이동 중" : "사우나로 이동 중 (방 없는 AI)",
             AIState.UsingSauna => currentRoomIndex != -1 ? $"룸 {currentRoomIndex + 1}번 사우나 사용 중" : "사우나 사용 중 (방 없는 AI)",
+            AIState.MovingToCafe => currentRoomIndex != -1 ? $"룸 {currentRoomIndex + 1}번 카페로 이동 중" : "카페로 이동 중 (방 없는 AI)",
+            AIState.UsingCafe => currentRoomIndex != -1 ? $"룸 {currentRoomIndex + 1}번 카페 사용 중" : "카페 사용 중 (방 없는 AI)",
+            AIState.MovingToBath => currentRoomIndex != -1 ? $"룸 {currentRoomIndex + 1}번 Bath로 이동 중" : "Bath로 이동 중 (방 없는 AI)",
+            AIState.UsingBath => currentRoomIndex != -1 ? $"룸 {currentRoomIndex + 1}번 Bath 사용 중" : "Bath 사용 중 (방 없는 AI)",
             AIState.MovingToKitchenCounter => "주방 카운터로 이동 중",
             AIState.WaitingAtKitchenCounter => "주방 카운터에서 대기 중",
             AIState.MovingToChair => "의자로 이동 중",
@@ -7118,6 +7461,1262 @@ public class AIAgent : MonoBehaviour
     }
     #endregion
 
+    #region 카페 관련 메서드
+    /// <summary>
+    /// 일반 손님용: 맵에서 Cafe 태그를 가진 오브젝트 찾기
+    /// </summary>
+    private bool TryFindAvailableCafe()
+    {
+        GameObject[] allCafes = GameObject.FindGameObjectsWithTag("Cafe");
+        
+        if (allCafes.Length == 0)
+        {
+            return false;
+        }
+
+        // 같은 층에서 가장 가까운 카페 우선 찾기
+        Transform nearestSameFloorCafe = null;
+        float minSameFloorDistance = float.MaxValue;
+
+        // 다른 층에서 가장 가까운 카페 (백업)
+        Transform nearestOtherFloorCafe = null;
+        float minOtherFloorDistance = float.MaxValue;
+
+        foreach (var cafe in allCafes)
+        {
+            if (cafe != null)
+            {
+                float distance = Vector3.Distance(transform.position, cafe.transform.position);
+                
+                if (IsSameFloor(cafe.transform.position.y))
+                {
+                    // 같은 층
+                    if (distance < minSameFloorDistance)
+                    {
+                        minSameFloorDistance = distance;
+                        nearestSameFloorCafe = cafe.transform;
+                    }
+                }
+                else
+                {
+                    // 다른 층
+                    if (distance < minOtherFloorDistance)
+                    {
+                        minOtherFloorDistance = distance;
+                        nearestOtherFloorCafe = cafe.transform;
+                    }
+                }
+            }
+        }
+
+        // 같은 층 우선, 없으면 다른 층
+        Transform selectedCafe = nearestSameFloorCafe ?? nearestOtherFloorCafe;
+
+        if (selectedCafe != null)
+        {
+            currentCafeTransform = selectedCafe;
+            preCafePosition = transform.position;
+            preCafeRotation = transform.rotation;
+            
+            Debug.Log($"[Cafe 찾기] {gameObject.name}: 카페 찾음 (층: {GetFloorLevel(selectedCafe.position.y)})");
+            
+            TransitionToState(AIState.MovingToCafe);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 현재 방 안에 Cafe 태그를 가진 오브젝트 찾기
+    /// </summary>
+    private bool FindCafeInCurrentRoom(out Transform cafeTransform)
+    {
+        cafeTransform = null;
+        
+        if (currentRoomIndex < 0 || currentRoomIndex >= roomList.Count)
+        {
+            return false;
+        }
+
+        var room = roomList[currentRoomIndex];
+        if (room == null || room.gameObject == null)
+        {
+            return false;
+        }
+
+        // 방 안의 모든 "Cafe" 태그를 가진 오브젝트 찾기
+        GameObject[] allCafes = GameObject.FindGameObjectsWithTag("Cafe");
+        
+        Transform sameFloorCafe = null;
+        Transform otherFloorCafe = null;
+        
+        foreach (var cafe in allCafes)
+        {
+            // 방의 bounds 안에 있는지 확인
+            if (room.bounds.Contains(cafe.transform.position))
+            {
+                // 같은 층이면 우선순위
+                if (IsSameFloor(cafe.transform.position.y))
+                {
+                    sameFloorCafe = cafe.transform;
+                    break; // 같은 층 찾으면 바로 사용
+                }
+                else if (otherFloorCafe == null)
+                {
+                    // 다른 층은 백업으로 저장
+                    otherFloorCafe = cafe.transform;
+                }
+            }
+        }
+
+        // 같은 층 우선, 없으면 다른 층 사용
+        Transform selectedCafe = sameFloorCafe ?? otherFloorCafe;
+        
+        if (selectedCafe != null)
+        {
+            cafeTransform = selectedCafe;
+            Debug.Log($"[Cafe 찾기] {gameObject.name}: 방 안에서 카페 찾음 (층: {GetFloorLevel(selectedCafe.position.y)})");
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 카페로 이동하는 코루틴
+    /// </summary>
+    private IEnumerator MoveToCafeBehavior()
+    {
+        if (currentCafeTransform == null || currentCafeTransform.gameObject == null)
+        {
+            DetermineBehaviorByTime();
+            yield break;
+        }
+
+        // 먼저 CafePoint가 있는지 확인
+        Transform cafePoint = FindNearestCafePoint(currentCafeTransform);
+        
+        // 사용 가능한 CafePoint가 없으면 배회로 전환
+        if (cafePoint == null)
+        {
+            Debug.Log($"[Cafe] {gameObject.name}: 사용 가능한 CafePoint 없음 - 배회로 전환");
+            
+            // 투숙객이면 방 배회, 일반 손님이면 일반 배회
+            if (currentRoomIndex != -1)
+            {
+                TransitionToState(AIState.RoomWandering);
+            }
+            else
+            {
+                TransitionToState(AIState.Wandering);
+            }
+            yield break;
+        }
+        
+        // CafePoint가 있으면 해당 위치로 이동
+        Vector3 targetPos = new Vector3(
+            cafePoint.position.x,
+            transform.position.y, // 현재 AI의 Y 높이 유지
+            cafePoint.position.z
+        );
+        Debug.Log($"[Cafe] {gameObject.name}: CafePoint로 이동 ({cafePoint.name})");
+        
+        // NavMeshAgent가 자동으로 층간 이동 경로를 찾도록 목표 위치를 그대로 설정
+        bool pathSet = agent.SetDestination(targetPos);
+        
+        // 디버그: 경로 설정 상태 확인
+        if (!pathSet)
+        {
+            Debug.LogError($"[Cafe] {gameObject.name}: 경로 설정 실패! 목표 위치: {targetPos}, NavMesh 위 여부: {agent.isOnNavMesh}");
+            DetermineBehaviorByTime();
+            yield break;
+        }
+        
+        Debug.Log($"[Cafe] {gameObject.name}: 카페 이동 시작 - 현재 위치: {transform.position}, 목표 위치: {targetPos}, 거리: {Vector3.Distance(transform.position, targetPos):F2}m");
+
+        // 카페에 도착할 때까지 대기
+        while (agent.pathPending || agent.remainingDistance > arrivalDistance)
+        {
+            // 이동 중 카페 삭제 감지
+            if (currentCafeTransform == null || currentCafeTransform.gameObject == null)
+            {
+                Debug.LogWarning($"[Cafe] {gameObject.name}: 이동 중 카페가 삭제됨");
+                DetermineBehaviorByTime();
+                yield break;
+            }
+            
+            yield return null;
+        }
+        
+        Debug.Log($"[Cafe] {gameObject.name}: 카페 도착 완료!");
+
+        // 카페에 도착했으므로 사용 시작 (CafePoint 전달)
+        StartUsingCafe(cafePoint);
+    }
+    
+    /// <summary>
+    /// 카페 주변에서 가장 가까운 사용 가능한 CafePoint 찾기 (점유 관리)
+    /// </summary>
+    private Transform FindNearestCafePoint(Transform cafe)
+    {
+        GameObject[] allCafePoints = GameObject.FindGameObjectsWithTag("CafePoint");
+        
+        if (allCafePoints == null || allCafePoints.Length == 0)
+        {
+            return null;
+        }
+        
+        lock (cafePointLock)
+        {
+            Transform nearestPoint = null;
+            float nearestDistance = float.MaxValue;
+            
+            foreach (var point in allCafePoints)
+            {
+                if (point == null) continue;
+                
+                // 이미 다른 AI가 점유 중인지 확인
+                if (occupiedCafePoints.ContainsKey(point.transform))
+                {
+                    // 점유한 AI가 null이거나 삭제되었으면 점유 해제
+                    if (occupiedCafePoints[point.transform] == null)
+                    {
+                        occupiedCafePoints.Remove(point.transform);
+                    }
+                    else
+                    {
+                        // 다른 AI가 사용 중이면 스킵
+                        continue;
+                    }
+                }
+                
+                float distance = Vector3.Distance(cafe.position, point.transform.position);
+                
+                // 거리 제한 없이 가장 가까운 CafePoint 찾기
+                if (distance < nearestDistance)
+                {
+                    nearestDistance = distance;
+                    nearestPoint = point.transform;
+                }
+            }
+            
+            // 찾은 Point를 점유 등록
+            if (nearestPoint != null)
+            {
+                occupiedCafePoints[nearestPoint] = this;
+                currentCafePoint = nearestPoint;
+                Debug.Log($"[CafePoint 점유] {gameObject.name}: {nearestPoint.name} 점유 (점유 중: {occupiedCafePoints.Count}개)");
+            }
+            
+            return nearestPoint;
+        }
+    }
+
+    /// <summary>
+    /// 카페 사용을 시작합니다.
+    /// </summary>
+    /// <param name="cafePoint">CafePoint Transform</param>
+    private void StartUsingCafe(Transform cafePoint)
+    {
+        // cafePoint가 null이면 자동으로 찾기
+        if (cafePoint == null && currentCafeTransform != null)
+        {
+            cafePoint = FindNearestCafePoint(currentCafeTransform);
+        }
+        
+        if (cafePoint == null)
+        {
+            Debug.LogWarning($"[카페 사용 실패] {gameObject.name}: CafePoint를 찾을 수 없습니다.");
+            DetermineBehaviorByTime();
+            return;
+        }
+
+        currentCafePoint = cafePoint;
+        
+        // AI를 CafePoint의 위치와 회전으로 정확히 이동
+        transform.position = cafePoint.position;
+        transform.rotation = cafePoint.rotation;
+        
+        Debug.Log($"[카페 사용 시작] {gameObject.name}: 위치 설정 완료 - CafePoint: {cafePoint.position}");
+
+        // 앉기 애니메이션 시작
+        if (animator != null)
+        {
+            animator.SetBool("Sitting", true);
+            Debug.Log($"[카페 애니메이션] {gameObject.name}: Sitting 애니메이션 시작");
+        }
+
+        // 상태 플래그 설정
+        isUsingCafe = true;
+        TransitionToState(AIState.UsingCafe);
+
+        int aiFloor = GetFloorLevel(transform.position.y);
+        int cafeFloor = GetFloorLevel(currentCafeTransform.position.y);
+        Debug.Log($"[카페 사용 시작] {gameObject.name}: 위치({transform.position}), AI 층: {aiFloor}, 카페 층: {cafeFloor}");
+    }
+
+    /// <summary>
+    /// 카페 사용을 종료합니다. (다음 정각에 호출)
+    /// </summary>
+    private void FinishUsingCafe()
+    {
+        if (!isUsingCafe)
+        {
+            return;
+        }
+
+        Debug.Log($"[카페 사용 종료] {gameObject.name}: 다음 정각이 되어 종료");
+        
+        // CafePoint 점유 해제
+        if (currentCafePoint != null)
+        {
+            lock (cafePointLock)
+            {
+                if (occupiedCafePoints.ContainsKey(currentCafePoint) && occupiedCafePoints[currentCafePoint] == this)
+                {
+                    occupiedCafePoints.Remove(currentCafePoint);
+                    Debug.Log($"[CafePoint 점유 해제] {gameObject.name}: {currentCafePoint.name} 점유 해제 (점유 중: {occupiedCafePoints.Count}개)");
+                }
+            }
+            currentCafePoint = null;
+        }
+
+        // 애니메이션 종료
+        if (animator != null)
+        {
+            animator.SetBool("Sitting", false);
+        }
+
+        // 이전 위치로 복귀
+        if (NavMesh.SamplePosition(preCafePosition, out NavMeshHit hit, 2f, NavMesh.AllAreas))
+        {
+            transform.position = hit.position;
+        }
+        else
+        {
+            transform.position = preCafePosition;
+        }
+        transform.rotation = preCafeRotation;
+
+        // 카페 결제 처리
+        ProcessCafeFacilityPayment();
+
+        // 상태 초기화
+        isUsingCafe = false;
+        currentCafeTransform = null;
+        cafeCoroutine = null;
+
+        // 다음 행동 결정
+        DetermineBehaviorByTime();
+    }
+
+    /// <summary>
+    /// 카페 결제 처리 (RoomManager를 통해 - FacilityPriceConfig 사용)
+    /// </summary>
+    private void ProcessCafeFacilityPayment()
+    {
+        // RoomManager를 통한 결제 처리
+        if (roomManager != null)
+        {
+            roomManager.ProcessCafeFacilityPayment(gameObject.name);
+        }
+        else
+        {
+            Debug.LogError($"[카페 결제 실패] {gameObject.name}: RoomManager가 null입니다.");
+        }
+    }
+    #endregion
+
+    #region Bath 관련 메서드
+    /// <summary>
+    /// 일반 손님용: 맵에서 Bath 태그를 가진 오브젝트 찾기
+    /// </summary>
+    private bool TryFindAvailableBath()
+    {
+        GameObject[] allBaths = GameObject.FindGameObjectsWithTag("Bath");
+        
+        if (allBaths.Length == 0)
+        {
+            return false;
+        }
+
+        // 같은 층에서 가장 가까운 Bath 우선 찾기
+        Transform nearestSameFloorBath = null;
+        float minSameFloorDistance = float.MaxValue;
+
+        // 다른 층에서 가장 가까운 Bath (백업)
+        Transform nearestOtherFloorBath = null;
+        float minOtherFloorDistance = float.MaxValue;
+
+        foreach (var bath in allBaths)
+        {
+            if (bath != null)
+            {
+                float distance = Vector3.Distance(transform.position, bath.transform.position);
+                
+                if (IsSameFloor(bath.transform.position.y))
+                {
+                    // 같은 층
+                    if (distance < minSameFloorDistance)
+                    {
+                        minSameFloorDistance = distance;
+                        nearestSameFloorBath = bath.transform;
+                    }
+                }
+                else
+                {
+                    // 다른 층
+                    if (distance < minOtherFloorDistance)
+                    {
+                        minOtherFloorDistance = distance;
+                        nearestOtherFloorBath = bath.transform;
+                    }
+                }
+            }
+        }
+
+        // 같은 층 우선, 없으면 다른 층
+        Transform selectedBath = nearestSameFloorBath ?? nearestOtherFloorBath;
+
+        if (selectedBath != null)
+        {
+            currentBathTransform = selectedBath;
+            preBathPosition = transform.position;
+            preBathRotation = transform.rotation;
+            
+            Debug.Log($"[Bath 찾기] {gameObject.name}: Bath 찾음 (층: {GetFloorLevel(selectedBath.position.y)})");
+            
+            TransitionToState(AIState.MovingToBath);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 현재 방 안에 Bath 태그를 가진 오브젝트 찾기
+    /// </summary>
+    private bool FindBathInCurrentRoom(out Transform bathTransform)
+    {
+        bathTransform = null;
+        
+        if (currentRoomIndex < 0 || currentRoomIndex >= roomList.Count)
+        {
+            return false;
+        }
+
+        var room = roomList[currentRoomIndex];
+        if (room == null || room.gameObject == null)
+        {
+            return false;
+        }
+
+        // 방 안의 모든 "Bath" 태그를 가진 오브젝트 찾기
+        GameObject[] allBaths = GameObject.FindGameObjectsWithTag("Bath");
+        
+        Transform sameFloorBath = null;
+        Transform otherFloorBath = null;
+        
+        foreach (var bath in allBaths)
+        {
+            // 방의 bounds 안에 있는지 확인
+            if (room.bounds.Contains(bath.transform.position))
+            {
+                // 같은 층이면 우선순위
+                if (IsSameFloor(bath.transform.position.y))
+                {
+                    sameFloorBath = bath.transform;
+                    break; // 같은 층 찾으면 바로 사용
+                }
+                else if (otherFloorBath == null)
+                {
+                    // 다른 층은 백업으로 저장
+                    otherFloorBath = bath.transform;
+                }
+            }
+        }
+
+        // 같은 층 우선, 없으면 다른 층 사용
+        Transform selectedBath = sameFloorBath ?? otherFloorBath;
+        
+        if (selectedBath != null)
+        {
+            bathTransform = selectedBath;
+            Debug.Log($"[Bath 찾기] {gameObject.name}: 방 안에서 Bath 찾음 (층: {GetFloorLevel(selectedBath.position.y)})");
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Bath로 이동하는 코루틴
+    /// </summary>
+    private IEnumerator MoveToBathBehavior()
+    {
+        if (currentBathTransform == null || currentBathTransform.gameObject == null)
+        {
+            DetermineBehaviorByTime();
+            yield break;
+        }
+
+        // BathSitPoint 또는 BathDownPoint를 랜덤으로 선택
+        bool useSitPoint = Random.value < 0.5f;
+        Transform bathPoint = useSitPoint ? FindNearestBathSitPoint(currentBathTransform) : FindNearestBathDownPoint(currentBathTransform);
+        isBathSitting = useSitPoint;
+        
+        // 사용 가능한 BathPoint가 없으면 배회로 전환
+        if (bathPoint == null)
+        {
+            Debug.Log($"[Bath] {gameObject.name}: 사용 가능한 BathPoint 없음 - 배회로 전환");
+            
+            // 투숙객이면 방 배회, 일반 손님이면 일반 배회
+            if (currentRoomIndex != -1)
+            {
+                TransitionToState(AIState.RoomWandering);
+            }
+            else
+            {
+                TransitionToState(AIState.Wandering);
+            }
+            yield break;
+        }
+        
+        // BathPoint가 있으면 해당 위치로 이동
+        Vector3 targetPos = new Vector3(
+            bathPoint.position.x,
+            transform.position.y, // 현재 AI의 Y 높이 유지
+            bathPoint.position.z
+        );
+        Debug.Log($"[Bath] {gameObject.name}: BathPoint로 이동 ({bathPoint.name}, {(isBathSitting ? "Sitting" : "Down")})");
+        
+        // NavMeshAgent가 자동으로 층간 이동 경로를 찾도록 목표 위치를 그대로 설정
+        bool pathSet = agent.SetDestination(targetPos);
+        
+        // 디버그: 경로 설정 상태 확인
+        if (!pathSet)
+        {
+            Debug.LogError($"[Bath] {gameObject.name}: 경로 설정 실패! 목표 위치: {targetPos}, NavMesh 위 여부: {agent.isOnNavMesh}");
+            DetermineBehaviorByTime();
+            yield break;
+        }
+        
+        Debug.Log($"[Bath] {gameObject.name}: Bath 이동 시작 - 현재 위치: {transform.position}, 목표 위치: {targetPos}, 거리: {Vector3.Distance(transform.position, targetPos):F2}m");
+
+        // Bath에 도착할 때까지 대기
+        while (agent.pathPending || agent.remainingDistance > arrivalDistance)
+        {
+            // 이동 중 Bath 삭제 감지
+            if (currentBathTransform == null || currentBathTransform.gameObject == null)
+            {
+                Debug.LogWarning($"[Bath] {gameObject.name}: 이동 중 Bath가 삭제됨");
+                DetermineBehaviorByTime();
+                yield break;
+            }
+            
+            yield return null;
+        }
+        
+        Debug.Log($"[Bath] {gameObject.name}: Bath 도착 완료!");
+
+        // Bath에 도착했으므로 사용 시작 (BathPoint 전달)
+        StartUsingBath(bathPoint);
+    }
+    
+    /// <summary>
+    /// Bath 주변에서 가장 가까운 사용 가능한 BathSitPoint 찾기 (점유 관리)
+    /// </summary>
+    private Transform FindNearestBathSitPoint(Transform bath)
+    {
+        GameObject[] allBathSitPoints = GameObject.FindGameObjectsWithTag("BathSitPoint");
+        
+        if (allBathSitPoints == null || allBathSitPoints.Length == 0)
+        {
+            return null;
+        }
+        
+        lock (bathSitPointLock)
+        {
+            Transform nearestPoint = null;
+            float nearestDistance = float.MaxValue;
+            
+            foreach (var point in allBathSitPoints)
+            {
+                if (point == null) continue;
+                
+                // 이미 다른 AI가 점유 중인지 확인
+                if (occupiedBathSitPoints.ContainsKey(point.transform))
+                {
+                    // 점유한 AI가 null이거나 삭제되었으면 점유 해제
+                    if (occupiedBathSitPoints[point.transform] == null)
+                    {
+                        occupiedBathSitPoints.Remove(point.transform);
+                    }
+                    else
+                    {
+                        // 다른 AI가 사용 중이면 스킵
+                        continue;
+                    }
+                }
+                
+                float distance = Vector3.Distance(bath.position, point.transform.position);
+                
+                // 거리 제한 없이 가장 가까운 BathSitPoint 찾기
+                if (distance < nearestDistance)
+                {
+                    nearestDistance = distance;
+                    nearestPoint = point.transform;
+                }
+            }
+            
+            // 찾은 Point를 점유 등록
+            if (nearestPoint != null)
+            {
+                occupiedBathSitPoints[nearestPoint] = this;
+                currentBathPoint = nearestPoint;
+                Debug.Log($"[BathSitPoint 점유] {gameObject.name}: {nearestPoint.name} 점유 (점유 중: {occupiedBathSitPoints.Count}개)");
+            }
+            
+            return nearestPoint;
+        }
+    }
+    
+    /// <summary>
+    /// Bath 주변에서 가장 가까운 사용 가능한 BathDownPoint 찾기 (점유 관리)
+    /// </summary>
+    private Transform FindNearestBathDownPoint(Transform bath)
+    {
+        GameObject[] allBathDownPoints = GameObject.FindGameObjectsWithTag("BathDownPoint");
+        
+        if (allBathDownPoints == null || allBathDownPoints.Length == 0)
+        {
+            return null;
+        }
+        
+        lock (bathDownPointLock)
+        {
+            Transform nearestPoint = null;
+            float nearestDistance = float.MaxValue;
+            
+            foreach (var point in allBathDownPoints)
+            {
+                if (point == null) continue;
+                
+                // 이미 다른 AI가 점유 중인지 확인
+                if (occupiedBathDownPoints.ContainsKey(point.transform))
+                {
+                    // 점유한 AI가 null이거나 삭제되었으면 점유 해제
+                    if (occupiedBathDownPoints[point.transform] == null)
+                    {
+                        occupiedBathDownPoints.Remove(point.transform);
+                    }
+                    else
+                    {
+                        // 다른 AI가 사용 중이면 스킵
+                        continue;
+                    }
+                }
+                
+                float distance = Vector3.Distance(bath.position, point.transform.position);
+                
+                // 거리 제한 없이 가장 가까운 BathDownPoint 찾기
+                if (distance < nearestDistance)
+                {
+                    nearestDistance = distance;
+                    nearestPoint = point.transform;
+                }
+            }
+            
+            // 찾은 Point를 점유 등록
+            if (nearestPoint != null)
+            {
+                occupiedBathDownPoints[nearestPoint] = this;
+                currentBathPoint = nearestPoint;
+                Debug.Log($"[BathDownPoint 점유] {gameObject.name}: {nearestPoint.name} 점유 (점유 중: {occupiedBathDownPoints.Count}개)");
+            }
+            
+            return nearestPoint;
+        }
+    }
+
+    /// <summary>
+    /// Bath 사용을 시작합니다.
+    /// </summary>
+    /// <param name="bathPoint">BathSitPoint 또는 BathDownPoint Transform</param>
+    private void StartUsingBath(Transform bathPoint)
+    {
+        if (bathPoint == null)
+        {
+            Debug.LogWarning($"[Bath 사용 실패] {gameObject.name}: BathPoint를 찾을 수 없습니다.");
+            DetermineBehaviorByTime();
+            return;
+        }
+
+        currentBathPoint = bathPoint;
+        
+        // AI를 BathPoint의 위치와 회전으로 정확히 이동
+        transform.position = bathPoint.position;
+        transform.rotation = bathPoint.rotation;
+        
+        Debug.Log($"[Bath 사용 시작] {gameObject.name}: 위치 설정 완료 - BathPoint: {bathPoint.position}, 타입: {(isBathSitting ? "Sitting" : "Down")}");
+
+        // 애니메이션 시작 (Sitting 또는 BedTime)
+        if (animator != null)
+        {
+            if (isBathSitting)
+            {
+                animator.SetBool("Sitting", true);
+                Debug.Log($"[Bath 애니메이션] {gameObject.name}: Sitting 애니메이션 시작");
+            }
+            else
+            {
+                animator.SetBool("BedTime", true);
+                Debug.Log($"[Bath 애니메이션] {gameObject.name}: BedTime 애니메이션 시작");
+            }
+        }
+
+        // 상태 플래그 설정
+        isUsingBath = true;
+        TransitionToState(AIState.UsingBath);
+
+        int aiFloor = GetFloorLevel(transform.position.y);
+        int bathFloor = GetFloorLevel(currentBathTransform.position.y);
+        Debug.Log($"[Bath 사용 시작] {gameObject.name}: 위치({transform.position}), AI 층: {aiFloor}, Bath 층: {bathFloor}");
+    }
+
+    /// <summary>
+    /// Bath 사용을 종료합니다. (다음 정각에 호출)
+    /// </summary>
+    private void FinishUsingBath()
+    {
+        if (!isUsingBath)
+        {
+            return;
+        }
+
+        Debug.Log($"[Bath 사용 종료] {gameObject.name}: 다음 정각이 되어 종료 (타입: {(isBathSitting ? "Sitting" : "Down")})");
+        
+        // BathPoint 점유 해제
+        if (currentBathPoint != null)
+        {
+            if (isBathSitting)
+            {
+                lock (bathSitPointLock)
+                {
+                    if (occupiedBathSitPoints.ContainsKey(currentBathPoint) && occupiedBathSitPoints[currentBathPoint] == this)
+                    {
+                        occupiedBathSitPoints.Remove(currentBathPoint);
+                        Debug.Log($"[BathSitPoint 점유 해제] {gameObject.name}: {currentBathPoint.name} 점유 해제 (점유 중: {occupiedBathSitPoints.Count}개)");
+                    }
+                }
+            }
+            else
+            {
+                lock (bathDownPointLock)
+                {
+                    if (occupiedBathDownPoints.ContainsKey(currentBathPoint) && occupiedBathDownPoints[currentBathPoint] == this)
+                    {
+                        occupiedBathDownPoints.Remove(currentBathPoint);
+                        Debug.Log($"[BathDownPoint 점유 해제] {gameObject.name}: {currentBathPoint.name} 점유 해제 (점유 중: {occupiedBathDownPoints.Count}개)");
+                    }
+                }
+            }
+            currentBathPoint = null;
+        }
+
+        // 애니메이션 종료
+        if (animator != null)
+        {
+            if (isBathSitting)
+            {
+                animator.SetBool("Sitting", false);
+            }
+            else
+            {
+                animator.SetBool("BedTime", false);
+            }
+        }
+
+        // 이전 위치로 복귀
+        if (NavMesh.SamplePosition(preBathPosition, out NavMeshHit hit, 2f, NavMesh.AllAreas))
+        {
+            transform.position = hit.position;
+        }
+        else
+        {
+            transform.position = preBathPosition;
+        }
+        transform.rotation = preBathRotation;
+
+        // Bath 결제 처리
+        ProcessBathFacilityPayment();
+
+        // 상태 초기화
+        isUsingBath = false;
+        isBathSitting = false;
+        currentBathTransform = null;
+        bathCoroutine = null;
+
+        // 다음 행동 결정
+        DetermineBehaviorByTime();
+    }
+
+    /// <summary>
+    /// Bath 결제 처리 (RoomManager를 통해 - FacilityPriceConfig 사용)
+    /// </summary>
+    private void ProcessBathFacilityPayment()
+    {
+        // RoomManager를 통한 결제 처리
+        if (roomManager != null)
+        {
+            roomManager.ProcessBathFacilityPayment(gameObject.name);
+        }
+        else
+        {
+            Debug.LogError($"[Bath 결제 실패] {gameObject.name}: RoomManager가 null입니다.");
+        }
+    }
+    #endregion
+
+    #region Hos(고급식당) 관련 메서드
+    /// <summary>
+    /// 사용 가능한 Hos를 찾습니다 (방 밖)
+    /// </summary>
+    private bool TryFindAvailableHos()
+    {
+        // 현재 11~22시인지 확인
+        if (timeSystem == null || timeSystem.CurrentHour < 11 || timeSystem.CurrentHour > 22)
+        {
+            Debug.Log($"[Hos] {gameObject.name}: Hos 운영 시간이 아닙니다.");
+            return false;
+        }
+
+        GameObject[] hosObjects = GameObject.FindGameObjectsWithTag("Hos");
+        if (hosObjects.Length == 0)
+        {
+            Debug.Log($"[Hos] {gameObject.name}: Hos가 없습니다.");
+            return false;
+        }
+
+        // 가장 가까운 사용 가능한 Hos 찾기
+        Transform nearestHos = null;
+        float nearestDistance = float.MaxValue;
+
+        foreach (GameObject hosObj in hosObjects)
+        {
+            Transform hosTransform = hosObj.transform;
+
+            // 이미 점유된 Hos는 건너뛰기
+            lock (hosLock)
+            {
+                if (occupiedHosFacilities.ContainsKey(hosTransform))
+                {
+                    continue;
+                }
+            }
+
+            // 사용 가능한 포인트가 있는지 확인
+            Transform[] hosPoints = hosTransform.GetComponentsInChildren<Transform>();
+            bool hasAvailablePoint = false;
+
+            foreach (Transform point in hosPoints)
+            {
+                if (point.CompareTag("HosPosition"))
+                {
+                    lock (hosPointLock)
+                    {
+                        if (!occupiedHosPoints.ContainsKey(point))
+                        {
+                            hasAvailablePoint = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (!hasAvailablePoint)
+            {
+                continue;
+            }
+
+            // 거리 계산
+            float distance = Vector3.Distance(transform.position, hosTransform.position);
+            if (distance < nearestDistance)
+            {
+                nearestDistance = distance;
+                nearestHos = hosTransform;
+            }
+        }
+
+        if (nearestHos != null)
+        {
+            currentHosTransform = nearestHos;
+            preHosPosition = transform.position;
+            preHosRotation = transform.rotation;
+            TransitionToState(AIState.MovingToHos);
+            return true;
+        }
+
+        Debug.Log($"[Hos] {gameObject.name}: 사용 가능한 Hos가 없습니다.");
+        return false;
+    }
+
+    /// <summary>
+    /// 현재 방에서 Hos를 찾습니다
+    /// </summary>
+    private bool FindHosInCurrentRoom(out Transform hosTransform)
+    {
+        hosTransform = null;
+
+        // 현재 11~22시인지 확인
+        if (timeSystem == null || timeSystem.CurrentHour < 11 || timeSystem.CurrentHour > 22)
+        {
+            Debug.Log($"[Hos] {gameObject.name}: Hos 운영 시간이 아닙니다.");
+            return false;
+        }
+
+        if (currentRoomIndex == -1 || currentRoomIndex >= roomList.Count)
+        {
+            return false;
+        }
+
+        RoomInfo currentRoom = roomList[currentRoomIndex];
+        Bounds roomBounds = currentRoom.bounds;
+
+        GameObject[] hosObjects = GameObject.FindGameObjectsWithTag("Hos");
+        foreach (GameObject hosObj in hosObjects)
+        {
+            if (roomBounds.Contains(hosObj.transform.position))
+            {
+                // 이미 점유된 Hos는 건너뛰기
+                lock (hosLock)
+                {
+                    if (occupiedHosFacilities.ContainsKey(hosObj.transform))
+                    {
+                        continue;
+                    }
+                }
+
+                // 사용 가능한 포인트가 있는지 확인
+                Transform[] hosPoints = hosObj.transform.GetComponentsInChildren<Transform>();
+                bool hasAvailablePoint = false;
+
+                foreach (Transform point in hosPoints)
+                {
+                    if (point.CompareTag("HosPosition"))
+                    {
+                        lock (hosPointLock)
+                        {
+                            if (!occupiedHosPoints.ContainsKey(point))
+                            {
+                                hasAvailablePoint = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (hasAvailablePoint)
+                {
+                    hosTransform = hosObj.transform;
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Hos로 이동하는 코루틴
+    /// </summary>
+    private IEnumerator MoveToHosBehavior()
+    {
+        if (currentHosTransform == null)
+        {
+            Debug.LogError($"[Hos] {gameObject.name}: currentHosTransform이 null입니다!");
+            TransitionToState(AIState.Wandering);
+            yield break;
+        }
+
+        // Hos 점유
+        lock (hosLock)
+        {
+            if (occupiedHosFacilities.ContainsKey(currentHosTransform))
+            {
+                Debug.Log($"[Hos] {gameObject.name}: Hos가 이미 점유되었습니다.");
+                currentHosTransform = null;
+                TransitionToState(AIState.Wandering);
+                yield break;
+            }
+            occupiedHosFacilities[currentHosTransform] = this;
+        }
+
+        // 가장 가까운 HosPosition 찾기
+        Transform hosPoint = FindNearestHosPoint(currentHosTransform);
+        if (hosPoint == null)
+        {
+            Debug.LogError($"[Hos] {gameObject.name}: HosPosition을 찾을 수 없습니다!");
+            
+            // 점유 해제
+            lock (hosLock)
+            {
+                if (occupiedHosFacilities.ContainsKey(currentHosTransform))
+                {
+                    occupiedHosFacilities.Remove(currentHosTransform);
+                }
+            }
+            
+            currentHosTransform = null;
+            TransitionToState(AIState.Wandering);
+            yield break;
+        }
+
+        currentHosPoint = hosPoint;
+
+        // Hos로 이동
+        if (agent != null && agent.isOnNavMesh)
+        {
+            agent.SetDestination(hosPoint.position);
+            Debug.Log($"[Hos] {gameObject.name}: Hos로 이동 시작");
+        }
+
+        // 도착까지 대기
+        while (Vector3.Distance(transform.position, hosPoint.position) > arrivalDistance)
+        {
+            yield return new WaitForSeconds(0.1f);
+        }
+
+        Debug.Log($"[Hos] {gameObject.name}: Hos 도착 완료!");
+        StartUsingHos(hosPoint);
+    }
+    
+    /// <summary>
+    /// 가장 가까운 HosPosition을 찾습니다
+    /// </summary>
+    private Transform FindNearestHosPoint(Transform hos)
+    {
+        Transform nearestPoint = null;
+        float nearestDistance = float.MaxValue;
+
+        Transform[] points = hos.GetComponentsInChildren<Transform>();
+
+        foreach (Transform point in points)
+        {
+            if (point.CompareTag("HosPosition"))
+            {
+                // 이미 점유된 포인트는 건너뛰기
+                lock (hosPointLock)
+                {
+                    if (occupiedHosPoints.ContainsKey(point))
+                    {
+                        continue;
+                    }
+                }
+
+                float distance = Vector3.Distance(transform.position, point.position);
+                if (distance < nearestDistance)
+                {
+                    nearestDistance = distance;
+                    nearestPoint = point;
+                }
+            }
+        }
+
+        if (nearestPoint != null)
+        {
+            // 포인트 점유
+            lock (hosPointLock)
+            {
+                occupiedHosPoints[nearestPoint] = this;
+            }
+        }
+
+        return nearestPoint;
+    }
+
+    /// <summary>
+    /// Hos 사용 시작
+    /// </summary>
+    private void StartUsingHos(Transform hosPoint)
+    {
+        if (hosPoint == null)
+        {
+            Debug.LogError($"[Hos] {gameObject.name}: hosPoint가 null입니다!");
+            return;
+        }
+
+        // HosPosition 위치와 회전값으로 정확히 맞추기
+        transform.position = hosPoint.position;
+        transform.rotation = hosPoint.rotation;
+
+        Debug.Log($"[Hos 사용 시작] {gameObject.name}: 위치 설정 완료 - HosPoint: {hosPoint.position}");
+
+        // ChairPoint 컴포넌트 가져오기
+        ChairPoint chairPoint = hosPoint.GetComponent<ChairPoint>();
+        if (chairPoint != null)
+        {
+            currentHosChairPoint = chairPoint;
+            chairPoint.OccupyChair(this);
+            Debug.Log($"[Hos 사용 시작] {gameObject.name}: ChairPoint 점유 완료 (테이블 활성화)");
+        }
+        else
+        {
+            Debug.LogWarning($"[Hos 사용 시작] {gameObject.name}: ChairPoint 컴포넌트를 찾을 수 없습니다!");
+        }
+
+        // 1단계: Sitting 애니메이션 시작
+        if (animator != null)
+        {
+            animator.SetBool("Sitting", true);
+            Debug.Log($"[Hos 애니메이션] {gameObject.name}: Sitting 애니메이션 시작");
+        }
+
+        // NavMeshAgent 비활성화 (자리에 고정)
+        if (agent != null)
+        {
+            agent.enabled = false;
+        }
+
+        // 2단계: Fork 또는 Spoon 랜덤 활성화
+        if (forkObject != null && spoonObject != null)
+        {
+            bool useFork = Random.value > 0.5f;
+            if (useFork)
+            {
+                forkObject.SetActive(true);
+                currentHosUtensil = forkObject;
+                Debug.Log($"[Hos 도구] {gameObject.name}: Fork 활성화");
+            }
+            else
+            {
+                spoonObject.SetActive(true);
+                currentHosUtensil = spoonObject;
+                Debug.Log($"[Hos 도구] {gameObject.name}: Spoon 활성화");
+            }
+        }
+        else
+        {
+            Debug.LogWarning($"[Hos 도구] {gameObject.name}: Fork 또는 Spoon 오브젝트가 null입니다!");
+        }
+
+        // 3단계: Eating 애니메이션 시작
+        if (animator != null)
+        {
+            animator.SetBool("Eating", true);
+            Debug.Log($"[Hos 애니메이션] {gameObject.name}: Eating 애니메이션 시작");
+        }
+
+        isUsingHos = true;
+        TransitionToState(AIState.UsingHos);
+
+        Debug.Log($"[Hos 사용 시작] {gameObject.name}: 위치({hosPoint.position}), AI 층: {GetFloorLevel(transform.position.y)}, Hos 층: {GetFloorLevel(currentHosTransform.position.y)}");
+    }
+
+    /// <summary>
+    /// Hos 사용 종료
+    /// </summary>
+    private void FinishUsingHos()
+    {
+        if (!isUsingHos)
+            return;
+
+        Debug.Log($"[Hos 사용 종료] {gameObject.name}: Hos 사용 종료 시작");
+
+        // 식사 도구 비활성화
+        if (currentHosUtensil != null)
+        {
+            currentHosUtensil.SetActive(false);
+            Debug.Log($"[Hos 사용 종료] {gameObject.name}: 식사 도구 비활성화");
+            currentHosUtensil = null;
+        }
+
+        // ChairPoint 해제 (테이블 비활성화)
+        if (currentHosChairPoint != null)
+        {
+            currentHosChairPoint.ReleaseChair(this);
+            Debug.Log($"[Hos 사용 종료] {gameObject.name}: ChairPoint 해제 완료 - 테이블 비활성화");
+            currentHosChairPoint = null;
+        }
+
+        // 애니메이션 종료
+        if (animator != null)
+        {
+            animator.SetBool("Eating", false);
+            animator.SetBool("Sitting", false);
+            Debug.Log($"[Hos 사용 종료] {gameObject.name}: 애니메이션 종료");
+        }
+
+        // NavMeshAgent 다시 활성화
+        if (agent != null)
+        {
+            agent.enabled = true;
+        }
+
+        // Point 점유 해제
+        if (currentHosPoint != null)
+        {
+            lock (hosPointLock)
+            {
+                if (occupiedHosPoints.ContainsKey(currentHosPoint))
+                {
+                    occupiedHosPoints.Remove(currentHosPoint);
+                    Debug.Log($"[Hos 점유 해제] {gameObject.name}: HosPoint 점유 해제");
+                }
+            }
+            currentHosPoint = null;
+        }
+
+        // 시설 점유 해제
+        if (currentHosTransform != null)
+        {
+            lock (hosLock)
+            {
+                if (occupiedHosFacilities.ContainsKey(currentHosTransform))
+                {
+                    occupiedHosFacilities.Remove(currentHosTransform);
+                    Debug.Log($"[Hos 점유 해제] {gameObject.name}: Hos 시설 점유 해제");
+                }
+            }
+        }
+
+        // 위치 복원
+        if (Vector3.Distance(transform.position, preHosPosition) > 0.1f)
+        {
+            transform.position = preHosPosition;
+        }
+        transform.rotation = preHosRotation;
+
+        // Hos 결제 처리
+        ProcessHosFacilityPayment();
+
+        // 상태 초기화
+        isUsingHos = false;
+        currentHosTransform = null;
+        hosCoroutine = null;
+
+        // 다음 행동 결정
+        DetermineBehaviorByTime();
+    }
+
+    /// <summary>
+    /// Hos 결제 처리 (RoomManager를 통해 - FacilityPriceConfig 사용)
+    /// </summary>
+    private void ProcessHosFacilityPayment()
+    {
+        // RoomManager를 통한 결제 처리
+        if (roomManager != null)
+        {
+            roomManager.ProcessHosFacilityPayment(gameObject.name);
+        }
+        else
+        {
+            Debug.LogError($"[Hos 결제 실패] {gameObject.name}: RoomManager가 null입니다.");
+        }
+    }
+    #endregion
+
     #region 운동 시설 (헬스장) 추가 메서드
     /// <summary>
     /// 운동 시설이 삭제되었을 때 강제 종료합니다.
@@ -7177,6 +8776,569 @@ public class AIAgent : MonoBehaviour
         CleanupResources();
     }
 
+    /// <summary>
+    /// 정각마다 호출되어 현재 진행 중인 활동을 정리합니다 (애니메이션, 오브젝트, 점유 해제).
+    /// 상태 전환은 하지 않고 정리만 수행합니다.
+    /// </summary>
+    private void CleanupCurrentActivity()
+    {
+        // 1. 식사 중이면 정리 (상태 전환 없이)
+        if (isEating)
+        {
+            // 식사 도구 비활성화
+            if (currentEatingUtensil != null)
+            {
+                currentEatingUtensil.SetActive(false);
+                currentEatingUtensil = null;
+            }
+
+            // ChairPoint 해제 (테이블 비활성화)
+            if (currentChairPoint != null)
+            {
+                currentChairPoint.ReleaseChair(this);
+                currentChairPoint = null;
+            }
+
+            // 애니메이션 종료
+            if (animator != null)
+            {
+                animator.SetBool("Eating", false);
+                animator.SetBool("Sitting", false);
+            }
+
+            // NavMeshAgent 활성화
+            if (agent != null && !agent.enabled)
+            {
+                agent.enabled = true;
+            }
+
+            // 플래그 및 변수 정리
+            isEating = false;
+            currentKitchenTransform = null;
+            currentChairTransform = null;
+            
+            Debug.Log($"[활동 정리] {gameObject.name}: 식사 활동 정리 완료");
+        }
+
+        // 2. 주방 카운터 대기 중이면 정리
+        if (isWaitingAtKitchenCounter)
+        {
+            if (currentKitchenCounter != null)
+            {
+                currentKitchenCounter.LeaveQueue(this);
+            }
+
+            CleanupKitchenVariables();
+            
+            if (agent != null)
+            {
+                agent.isStopped = false;
+            }
+            
+            Debug.Log($"[활동 정리] {gameObject.name}: 주방 카운터 대기 정리 완료");
+        }
+
+        // 3. 헬스장 사용 중이면 정리
+        if (isUsingHealth)
+        {
+            // 애니메이션 종료
+            if (animator != null)
+            {
+                animator.SetBool("Health", false);
+            }
+
+            // 덤벨 비활성화
+            if (leftDumbbell != null) leftDumbbell.SetActive(false);
+            if (rightDumbbell != null) rightDumbbell.SetActive(false);
+
+            // NavMeshAgent 활성화
+            if (agent != null && !agent.enabled)
+            {
+                agent.enabled = true;
+            }
+
+            // Point 점유 해제
+            if (currentHealthPoint != null)
+            {
+                lock (healthPointLock)
+                {
+                    if (occupiedHealthPoints.ContainsKey(currentHealthPoint))
+                    {
+                        occupiedHealthPoints.Remove(currentHealthPoint);
+                    }
+                }
+                currentHealthPoint = null;
+            }
+
+            // 시설 점유 해제
+            if (currentHealthTransform != null)
+            {
+                lock (healthLock)
+                {
+                    if (occupiedHealthFacilities.ContainsKey(currentHealthTransform))
+                    {
+                        occupiedHealthFacilities.Remove(currentHealthTransform);
+                    }
+                }
+            }
+
+            // 결제 처리
+            ProcessHealthFacilityPayment();
+
+            // 플래그 정리
+            isUsingHealth = false;
+            currentHealthTransform = null;
+            
+            Debug.Log($"[활동 정리] {gameObject.name}: 헬스장 활동 정리 완료");
+        }
+
+        // 4. 예식장 사용 중이면 정리
+        if (isUsingWedding)
+        {
+            // 애니메이션 종료
+            if (animator != null)
+            {
+                animator.SetBool("Sitting", false);
+            }
+
+            // NavMeshAgent 활성화
+            if (agent != null && !agent.enabled)
+            {
+                agent.enabled = true;
+            }
+
+            // Point 점유 해제
+            if (currentWeddingPoint != null)
+            {
+                lock (weddingPointLock)
+                {
+                    if (occupiedWeddingPoints.ContainsKey(currentWeddingPoint))
+                    {
+                        occupiedWeddingPoints.Remove(currentWeddingPoint);
+                    }
+                }
+                currentWeddingPoint = null;
+            }
+
+            // 시설 점유 해제
+            if (currentWeddingTransform != null)
+            {
+                lock (weddingLock)
+                {
+                    if (occupiedWeddingFacilities.ContainsKey(currentWeddingTransform))
+                    {
+                        occupiedWeddingFacilities.Remove(currentWeddingTransform);
+                    }
+                }
+            }
+
+            // 결제 처리
+            ProcessWeddingFacilityPayment();
+
+            // 플래그 정리
+            isUsingWedding = false;
+            currentWeddingTransform = null;
+            
+            Debug.Log($"[활동 정리] {gameObject.name}: 예식장 활동 정리 완료");
+        }
+
+        // 5. 라운지 사용 중이면 정리
+        if (isUsingLounge)
+        {
+            // 애니메이션 종료
+            if (animator != null)
+            {
+                animator.SetBool("Sitting", false);
+            }
+
+            // NavMeshAgent 활성화
+            if (agent != null && !agent.enabled)
+            {
+                agent.enabled = true;
+            }
+
+            // Point 점유 해제
+            if (currentLoungePoint != null)
+            {
+                lock (loungePointLock)
+                {
+                    if (occupiedLoungePoints.ContainsKey(currentLoungePoint))
+                    {
+                        occupiedLoungePoints.Remove(currentLoungePoint);
+                    }
+                }
+                currentLoungePoint = null;
+            }
+
+            // 시설 점유 해제
+            if (currentLoungeTransform != null)
+            {
+                lock (loungeLock)
+                {
+                    if (occupiedLoungeFacilities.ContainsKey(currentLoungeTransform))
+                    {
+                        occupiedLoungeFacilities.Remove(currentLoungeTransform);
+                    }
+                }
+            }
+
+            // 결제 처리
+            ProcessLoungeFacilityPayment();
+
+            // 플래그 정리
+            isUsingLounge = false;
+            currentLoungeTransform = null;
+            
+            Debug.Log($"[활동 정리] {gameObject.name}: 라운지 활동 정리 완료");
+        }
+
+        // 6. 연회장 사용 중이면 정리
+        if (isUsingHall)
+        {
+            // 애니메이션 종료
+            if (animator != null)
+            {
+                animator.SetBool("Sitting", false);
+            }
+
+            // NavMeshAgent 활성화
+            if (agent != null && !agent.enabled)
+            {
+                agent.enabled = true;
+            }
+
+            // Point 점유 해제
+            if (currentHallPoint != null)
+            {
+                lock (hallPointLock)
+                {
+                    if (occupiedHallPoints.ContainsKey(currentHallPoint))
+                    {
+                        occupiedHallPoints.Remove(currentHallPoint);
+                    }
+                }
+                currentHallPoint = null;
+            }
+
+            // 시설 점유 해제
+            if (currentHallTransform != null)
+            {
+                lock (hallLock)
+                {
+                    if (occupiedHallFacilities.ContainsKey(currentHallTransform))
+                    {
+                        occupiedHallFacilities.Remove(currentHallTransform);
+                    }
+                }
+            }
+
+            // 결제 처리
+            ProcessHallFacilityPayment();
+
+            // 플래그 정리
+            isUsingHall = false;
+            currentHallTransform = null;
+            
+            Debug.Log($"[활동 정리] {gameObject.name}: 연회장 활동 정리 완료");
+        }
+
+        // 7. 사우나 사용 중이면 정리
+        if (isUsingSauna)
+        {
+            // 애니메이션 종료
+            if (animator != null)
+            {
+                if (isSaunaSitting)
+                {
+                    animator.SetBool("Sitting", false);
+                }
+                else
+                {
+                    animator.SetBool("BedTime", false);
+                }
+            }
+
+            // NavMeshAgent 활성화
+            if (agent != null && !agent.enabled)
+            {
+                agent.enabled = true;
+            }
+
+            // Point 점유 해제
+            if (currentSaunaPoint != null)
+            {
+                if (isSaunaSitting)
+                {
+                    lock (saunaSitPointLock)
+                    {
+                        if (occupiedSaunaSitPoints.ContainsKey(currentSaunaPoint))
+                        {
+                            occupiedSaunaSitPoints.Remove(currentSaunaPoint);
+                        }
+                    }
+                }
+                else
+                {
+                    lock (saunaDownPointLock)
+                    {
+                        if (occupiedSaunaDownPoints.ContainsKey(currentSaunaPoint))
+                        {
+                            occupiedSaunaDownPoints.Remove(currentSaunaPoint);
+                        }
+                    }
+                }
+                currentSaunaPoint = null;
+            }
+
+            // 결제 처리
+            ProcessSaunaFacilityPayment();
+
+            // 플래그 정리
+            isUsingSauna = false;
+            currentSaunaTransform = null;
+            isSaunaSitting = false;
+            
+            Debug.Log($"[활동 정리] {gameObject.name}: 사우나 활동 정리 완료");
+        }
+
+        // 8. 카페 사용 중이면 정리
+        if (isUsingCafe)
+        {
+            // 애니메이션 종료
+            if (animator != null)
+            {
+                animator.SetBool("Sitting", false);
+            }
+
+            // NavMeshAgent 활성화
+            if (agent != null && !agent.enabled)
+            {
+                agent.enabled = true;
+            }
+
+            // Point 점유 해제
+            if (currentCafePoint != null)
+            {
+                lock (cafePointLock)
+                {
+                    if (occupiedCafePoints.ContainsKey(currentCafePoint))
+                    {
+                        occupiedCafePoints.Remove(currentCafePoint);
+                    }
+                }
+                currentCafePoint = null;
+            }
+
+            // 시설 점유 해제
+            if (currentCafeTransform != null)
+            {
+                lock (cafeLock)
+                {
+                    if (occupiedCafeFacilities.ContainsKey(currentCafeTransform))
+                    {
+                        occupiedCafeFacilities.Remove(currentCafeTransform);
+                    }
+                }
+            }
+
+            // 결제 처리
+            ProcessCafeFacilityPayment();
+
+            // 플래그 정리
+            isUsingCafe = false;
+            currentCafeTransform = null;
+            
+            Debug.Log($"[활동 정리] {gameObject.name}: 카페 활동 정리 완료");
+        }
+
+        // 9. Bath 사용 중이면 정리
+        if (isUsingBath)
+        {
+            // 애니메이션 종료
+            if (animator != null)
+            {
+                if (isBathSitting)
+                {
+                    animator.SetBool("Sitting", false);
+                }
+                else
+                {
+                    animator.SetBool("BedTime", false);
+                }
+            }
+
+            // NavMeshAgent 활성화
+            if (agent != null && !agent.enabled)
+            {
+                agent.enabled = true;
+            }
+
+            // Point 점유 해제
+            if (currentBathPoint != null)
+            {
+                if (isBathSitting)
+                {
+                    lock (bathSitPointLock)
+                    {
+                        if (occupiedBathSitPoints.ContainsKey(currentBathPoint))
+                        {
+                            occupiedBathSitPoints.Remove(currentBathPoint);
+                        }
+                    }
+                }
+                else
+                {
+                    lock (bathDownPointLock)
+                    {
+                        if (occupiedBathDownPoints.ContainsKey(currentBathPoint))
+                        {
+                            occupiedBathDownPoints.Remove(currentBathPoint);
+                        }
+                    }
+                }
+                currentBathPoint = null;
+            }
+
+            // 결제 처리
+            ProcessBathFacilityPayment();
+
+            // 플래그 정리
+            isUsingBath = false;
+            currentBathTransform = null;
+            isBathSitting = false;
+            
+            Debug.Log($"[활동 정리] {gameObject.name}: Bath 활동 정리 완료");
+        }
+
+        // 10. 선베드 사용 중이면 정리
+        if (isUsingSunbed)
+        {
+            // 애니메이션 종료
+            if (animator != null)
+            {
+                animator.SetBool("BedTime", false);
+            }
+
+            // NavMeshAgent 활성화
+            if (agent != null && !agent.enabled)
+            {
+                agent.enabled = true;
+            }
+
+            // 점유 해제
+            if (currentSunbedTransform != null)
+            {
+                lock (sunbedLock)
+                {
+                    if (occupiedSunbeds.ContainsKey(currentSunbedTransform))
+                    {
+                        occupiedSunbeds.Remove(currentSunbedTransform);
+                    }
+                }
+            }
+
+            // 결제 처리 (방 밖 선베드만)
+            if (!isSunbedInRoom)
+            {
+                ProcessSunbedPaymentDirectly();
+            }
+
+            // 플래그 정리
+            isUsingSunbed = false;
+            currentSunbedTransform = null;
+            isSunbedInRoom = false;
+            
+            Debug.Log($"[활동 정리] {gameObject.name}: 선베드 활동 정리 완료");
+        }
+
+        // 11. 욕조 사용 중이면 정리
+        if (isUsingBathtub)
+        {
+            // 애니메이션 종료
+            if (animator != null)
+            {
+                animator.SetBool("BedTime", false);
+            }
+
+            // NavMeshAgent 활성화
+            if (agent != null && !agent.enabled)
+            {
+                agent.enabled = true;
+            }
+
+            // 플래그 정리
+            isUsingBathtub = false;
+            currentBathtubTransform = null;
+            
+            Debug.Log($"[활동 정리] {gameObject.name}: 욕조 활동 정리 완료");
+        }
+
+        // 12. Hos(고급식당) 사용 중이면 정리
+        if (isUsingHos)
+        {
+            // 식사 도구 비활성화
+            if (currentHosUtensil != null)
+            {
+                currentHosUtensil.SetActive(false);
+                currentHosUtensil = null;
+            }
+
+            // ChairPoint 해제 (테이블 비활성화)
+            if (currentHosChairPoint != null)
+            {
+                currentHosChairPoint.ReleaseChair(this);
+                currentHosChairPoint = null;
+            }
+
+            // 애니메이션 종료
+            if (animator != null)
+            {
+                animator.SetBool("Sitting", false);
+                animator.SetBool("Eating", false);
+            }
+
+            // NavMeshAgent 활성화
+            if (agent != null && !agent.enabled)
+            {
+                agent.enabled = true;
+            }
+
+            // Point 점유 해제
+            if (currentHosPoint != null)
+            {
+                lock (hosPointLock)
+                {
+                    if (occupiedHosPoints.ContainsKey(currentHosPoint))
+                    {
+                        occupiedHosPoints.Remove(currentHosPoint);
+                    }
+                }
+                currentHosPoint = null;
+            }
+
+            // 시설 점유 해제
+            if (currentHosTransform != null)
+            {
+                lock (hosLock)
+                {
+                    if (occupiedHosFacilities.ContainsKey(currentHosTransform))
+                    {
+                        occupiedHosFacilities.Remove(currentHosTransform);
+                    }
+                }
+            }
+
+            // 결제 처리
+            ProcessHosFacilityPayment();
+
+            // 플래그 정리
+            isUsingHos = false;
+            currentHosTransform = null;
+            
+            Debug.Log($"[활동 정리] {gameObject.name}: Hos(고급식당) 활동 정리 완료");
+        }
+    }
+
     private void CleanupCoroutines()
     {
         if (wanderingCoroutine != null)
@@ -7232,6 +9394,18 @@ public class AIAgent : MonoBehaviour
         {
             StopCoroutine(healthCoroutine);
             healthCoroutine = null;
+        }
+        // cafeCoroutine은 UsingCafe 상태에서도 유지되어야 함
+        if (cafeCoroutine != null && currentState != AIState.UsingCafe)
+        {
+            StopCoroutine(cafeCoroutine);
+            cafeCoroutine = null;
+        }
+        // bathCoroutine은 UsingBath 상태에서도 유지되어야 함
+        if (bathCoroutine != null && currentState != AIState.UsingBath)
+        {
+            StopCoroutine(bathCoroutine);
+            bathCoroutine = null;
         }
         if (eatingCoroutine != null)
         {
@@ -7353,6 +9527,92 @@ public class AIAgent : MonoBehaviour
             currentHealthTransform = null;
             
             // 운동 시설은 방 시설이므로 결제 처리 없음
+        }
+        
+        // 카페 사용 상태 정리
+        if (isUsingCafe)
+        {
+            // 1. Sitting 애니메이션 종료
+            if (animator != null)
+            {
+                animator.SetBool("Sitting", false);
+            }
+
+            // 2. 저장된 위치로 복귀
+            transform.position = preCafePosition;
+            transform.rotation = preCafeRotation;
+
+            // 3. CafePoint 점유 해제
+            if (currentCafePoint != null)
+            {
+                lock (cafePointLock)
+                {
+                    if (occupiedCafePoints.ContainsKey(currentCafePoint) && occupiedCafePoints[currentCafePoint] == this)
+                    {
+                        occupiedCafePoints.Remove(currentCafePoint);
+                        Debug.Log($"[CafePoint 점유 해제] {gameObject.name}: AI 삭제로 점유 해제 (점유 중: {occupiedCafePoints.Count}개)");
+                    }
+                }
+                currentCafePoint = null;
+            }
+
+            // 4. 카페 사용 상태 해제
+            isUsingCafe = false;
+            currentCafeTransform = null;
+        }
+        
+        // Bath 사용 상태 정리
+        if (isUsingBath)
+        {
+            // 1. 애니메이션 종료
+            if (animator != null)
+            {
+                if (isBathSitting)
+                {
+                    animator.SetBool("Sitting", false);
+                }
+                else
+                {
+                    animator.SetBool("BedTime", false);
+                }
+            }
+
+            // 2. 저장된 위치로 복귀
+            transform.position = preBathPosition;
+            transform.rotation = preBathRotation;
+
+            // 3. BathPoint 점유 해제
+            if (currentBathPoint != null)
+            {
+                if (isBathSitting)
+                {
+                    lock (bathSitPointLock)
+                    {
+                        if (occupiedBathSitPoints.ContainsKey(currentBathPoint) && occupiedBathSitPoints[currentBathPoint] == this)
+                        {
+                            occupiedBathSitPoints.Remove(currentBathPoint);
+                            Debug.Log($"[BathSitPoint 점유 해제] {gameObject.name}: AI 삭제로 점유 해제 (점유 중: {occupiedBathSitPoints.Count}개)");
+                        }
+                    }
+                }
+                else
+                {
+                    lock (bathDownPointLock)
+                    {
+                        if (occupiedBathDownPoints.ContainsKey(currentBathPoint) && occupiedBathDownPoints[currentBathPoint] == this)
+                        {
+                            occupiedBathDownPoints.Remove(currentBathPoint);
+                            Debug.Log($"[BathDownPoint 점유 해제] {gameObject.name}: AI 삭제로 점유 해제 (점유 중: {occupiedBathDownPoints.Count}개)");
+                        }
+                    }
+                }
+                currentBathPoint = null;
+            }
+
+            // 4. Bath 사용 상태 해제
+            isUsingBath = false;
+            isBathSitting = false;
+            currentBathTransform = null;
         }
 
         // 식사 상태 정리 (GameObject 비활성화 시에는 코루틴 시작 없이)
