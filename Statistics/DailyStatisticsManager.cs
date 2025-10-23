@@ -191,7 +191,7 @@ public class DailyStatisticsManager : MonoBehaviour
         if (Instance == null)
         {
             Instance = this;
-            DontDestroyOnLoad(gameObject);
+            //DontDestroyOnLoad(gameObject);
         }
         else
         {
@@ -948,6 +948,32 @@ public class DailyStatisticsManager : MonoBehaviour
     {
         totalVisitorsToday += count;
         DebugLog($"수동으로 방문객 수 증가: +{count}명 (총: {totalVisitorsToday}명)", true);
+    }
+    
+    /// <summary>
+    /// 세이브 파일에서 로드할 때 현재 날의 데이터 복원 (SaveManager에서 호출)
+    /// </summary>
+    /// <param name="loadedTotalVisitors">로드된 총 방문객 수</param>
+    /// <param name="loadedStartingReputation">로드된 시작 명성도</param>
+    /// <param name="loadedStartingGold">로드된 시작 골드</param>
+    public void RestoreCurrentDayData(int loadedTotalVisitors, int loadedStartingReputation, int loadedStartingGold)
+    {
+        totalVisitorsToday = loadedTotalVisitors;
+        startingReputation = loadedStartingReputation;
+        startingGold = loadedStartingGold;
+        
+        // 현재 통계의 시작 값도 동기화
+        if (currentDayStatistics != null)
+        {
+            currentDayStatistics.startingReputation = loadedStartingReputation;
+            currentDayStatistics.startingGold = loadedStartingGold;
+            currentDayStatistics.totalVisitors = loadedTotalVisitors;
+        }
+        
+        DebugLog($"[RestoreCurrentDayData] 런타임 변수 복원 완료:", true);
+        DebugLog($"  - totalVisitorsToday: {totalVisitorsToday}", true);
+        DebugLog($"  - startingReputation: {startingReputation}", true);
+        DebugLog($"  - startingGold: {startingGold}", true);
     }
     
     #endregion
