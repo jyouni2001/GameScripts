@@ -54,11 +54,15 @@ namespace JY
             InitializeUI();
             SetupEventListeners();
             RefreshUI();
+            
+            // 주기적으로 UI 업데이트 시작 (Kitchen/Counter 태그 변경 감지용)
+            InvokeRepeating(nameof(RefreshUI), 1f, 1f);
         }
         
         private void OnDestroy()
         {
             RemoveEventListeners();
+            CancelInvoke(nameof(RefreshUI));
         }
         
         #endregion
@@ -363,6 +367,17 @@ namespace JY
             bool canAfford = playerWallet.CanAfford(employeeType.hiringCost);
             bool hasPrefab = employeeType.employeePrefab != null;
             bool canHireAtPosition = CanHireEmployeeAtPosition(employeeType);
+            
+            // 주방 직원인 경우 추가 디버그 로그
+            if (employeeType.workPositionTag == "WorkPosition_Kitchen")
+            {
+                Debug.Log($"====================================");
+                Debug.Log($"[UI 업데이트] 주방 직원 버튼 상태 확인");
+                Debug.Log($"[UI 업데이트] 골드 충분: {canAfford}");
+                Debug.Log($"[UI 업데이트] 프리팹 있음: {hasPrefab}");
+                Debug.Log($"[UI 업데이트] 고용 가능: {canHireAtPosition}");
+                Debug.Log($"====================================");
+            }
             
             // 디버그 로그 추가
             DebugLog($"UI 버튼 상태 확인 - {employeeType.typeName}: 골드={canAfford}, 프리팹={hasPrefab}, 위치={canHireAtPosition}");

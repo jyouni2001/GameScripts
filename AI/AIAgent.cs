@@ -742,6 +742,7 @@ public class AIAgent : MonoBehaviour
                         else if (randomValue < 0.70f) // 0.25 + 0.45 = 0.70
                         {
                             // 시설 존재 여부 확인
+                            bool counterAvailable = counterManager != null; // 카운터 (방 배정 시도)
                             bool sunbedAvailable = hour >= 11 && hour <= 15; // 선베드는 11~15시만
                             bool healthExists = GameObject.FindGameObjectsWithTag("Health").Length > 0;
                             bool weddingExists = hour >= 11 && hour <= 22 && GameObject.FindGameObjectsWithTag("Wedding").Length > 0;
@@ -754,6 +755,7 @@ public class AIAgent : MonoBehaviour
                             
                             // 시설 개수 카운트
                             int facilityCount = 0;
+                            if (counterAvailable) facilityCount++; // 카운터 추가
                             if (sunbedAvailable) facilityCount++;
                             if (healthExists) facilityCount++;
                             if (weddingExists) facilityCount++;
@@ -776,8 +778,13 @@ public class AIAgent : MonoBehaviour
                                 float probabilityPerFacility = 1.0f / facilityCount;
                                 int currentIndex = 0;
                                 
+                                // 카운터 (방 배정 시도)
+                                if (counterAvailable && facilityRandom < probabilityPerFacility * ++currentIndex)
+                                {
+                                    TransitionToState(AIState.MovingToQueue);
+                                }
                                 // 선베드 (11~15시만)
-                                if (sunbedAvailable && facilityRandom < probabilityPerFacility * ++currentIndex)
+                                else if (sunbedAvailable && facilityRandom < probabilityPerFacility * ++currentIndex)
                                 {
                                     if (!TryFindAvailableSunbed())
                                     {
@@ -3728,6 +3735,10 @@ public class AIAgent : MonoBehaviour
             return;
         }
 
+        // 1단계: 현재 위치 저장
+        preSleepPosition = transform.position;
+        preSleepRotation = transform.rotation;
+
         // BedPoint가 있으면 해당 위치로, 없으면 침대 위치로
         Vector3 targetPosition;
         Quaternion targetRotation;
@@ -3747,6 +3758,15 @@ public class AIAgent : MonoBehaviour
             Debug.Log($"[침대 직접 이동] {gameObject.name}: 침대 위치로 이동");
         }
         
+        // 2단계: NavMeshAgent 비활성화
+        if (agent != null)
+        {
+            agent.isStopped = true;
+            agent.ResetPath();
+            agent.enabled = false;
+        }
+
+        // 3단계: Point로 순간이동
         // NavMesh 위에서 유효한 위치 찾기
         if (NavMesh.SamplePosition(targetPosition, out NavMeshHit hit, 2f, NavMesh.AllAreas))
         {
@@ -3758,16 +3778,10 @@ public class AIAgent : MonoBehaviour
             transform.position = targetPosition;
         }
         
-        // 회전값 적용
+        // 4단계: 회전값 적용
         transform.rotation = targetRotation;
 
-        // NavMeshAgent 비활성화 (애니메이션 실행 중에는 이동하지 않음)
-        if (agent != null)
-        {
-            agent.enabled = false;
-        }
-
-        // BedTime 애니메이션 시작 (명시적으로 설정)
+        // 5단계: 애니메이션 시작
         if (animator != null)
         {
             animator.SetBool("BedTime", true);
@@ -4151,10 +4165,23 @@ public class AIAgent : MonoBehaviour
             return;
         }
 
+        // 1단계: 현재 위치 저장
+        preSunbedPosition = transform.position;
+        preSunbedRotation = transform.rotation;
+
         // 층간 이동 대응: 선베드의 정확한 Y 위치로 이동
         Vector3 sunbedPosition = currentSunbedTransform.position;
         sunbedPosition.z += 1f;  // z값 +1
         
+        // 2단계: NavMeshAgent 비활성화
+        if (agent != null)
+        {
+            agent.isStopped = true;
+            agent.ResetPath();
+            agent.enabled = false;
+        }
+
+        // 3단계: Point로 순간이동
         // NavMesh 위에서 유효한 위치 찾기 (같은 층의 NavMesh 위치)
         if (NavMesh.SamplePosition(sunbedPosition, out NavMeshHit hit, 2f, NavMesh.AllAreas))
         {
@@ -4166,13 +4193,8 @@ public class AIAgent : MonoBehaviour
             transform.position = sunbedPosition;
         }
         
+        // 4단계: 회전값 적용
         transform.rotation = currentSunbedTransform.rotation;
-
-        // NavMeshAgent 비활성화
-        if (agent != null)
-        {
-            agent.enabled = false;
-        }
 
         // 선베드 사용 상태 설정
         isUsingSunbed = true;
@@ -4184,7 +4206,7 @@ public class AIAgent : MonoBehaviour
             sunbedCoroutine = StartCoroutine(SunbedUsageTimer());
         }
         
-        // BedTime 애니메이션 시작
+        // 5단계: 애니메이션 시작
         if (animator != null)
         {
             animator.SetBool("BedTime", true);
@@ -4954,16 +4976,20 @@ public class AIAgent : MonoBehaviour
             Debug.Log($"[식사] {gameObject.name}: PickUp 애니메이션 종료");
         }
 
-        // 1단계: NavMeshAgent 먼저 비활성화 (이동 방지!)
+        // 1단계: 현재 위치 저장
+        preChairPosition = transform.position;
+        preChairRotation = transform.rotation;
+
+        // 2단계: NavMeshAgent 비활성화
         if (agent != null)
         {
-            agent.isStopped = true;      // 먼저 정지
-            agent.ResetPath();           // 경로 초기화
-            agent.enabled = false;       // 완전히 끄기
+            agent.isStopped = true;
+            agent.ResetPath();
+            agent.enabled = false;
             Debug.Log($"[식사] {gameObject.name}: NavMeshAgent 비활성화");
         }
 
-        // 2단계: 이제 안전하게 위치와 회전 변경
+        // 3단계: Point로 순간이동
         Vector3 chairPosition = currentChairTransform.position;
         
         // NavMesh 위에서 유효한 위치 찾기 (같은 층의 NavMesh 위치)
@@ -4977,6 +5003,7 @@ public class AIAgent : MonoBehaviour
             transform.position = chairPosition;
         }
         
+        // 4단계: 회전값 적용
         transform.rotation = currentChairTransform.rotation * Quaternion.Euler(0, 90, 0);
         Debug.Log($"[식사] {gameObject.name}: 의자 위치로 이동 완료 - {chairPosition}");
 
@@ -5717,6 +5744,10 @@ public class AIAgent : MonoBehaviour
             return;
         }
 
+        // 1단계: 현재 위치 저장
+        preBathtubPosition = transform.position;
+        preBathtubRotation = transform.rotation;
+
         // BathtubPoint가 있으면 해당 위치로, 없으면 욕조 위치로
         Vector3 targetPosition;
         Quaternion targetRotation;
@@ -5734,6 +5765,15 @@ public class AIAgent : MonoBehaviour
             Debug.Log($"[욕조 직접 이동] {gameObject.name}: 욕조 위치로 이동");
         }
         
+        // 2단계: NavMeshAgent 비활성화
+        if (agent != null)
+        {
+            agent.isStopped = true;
+            agent.ResetPath();
+            agent.enabled = false;
+        }
+
+        // 3단계: Point로 순간이동
         // NavMesh 위에서 유효한 위치 찾기
         if (NavMesh.SamplePosition(targetPosition, out NavMeshHit hit, 2f, NavMesh.AllAreas))
         {
@@ -5745,13 +5785,10 @@ public class AIAgent : MonoBehaviour
             transform.position = targetPosition;
         }
         
-        // 회전값 적용
+        // 4단계: 회전값 적용
         transform.rotation = targetRotation;
 
-        // NavMeshAgent 비활성화 (애니메이션 실행 중에는 이동하지 않음)
-        agent.enabled = false;
-
-        // BedTime 애니메이션 실행 (욕조는 누워서 사용)
+        // 5단계: 애니메이션 시작
         if (animator != null)
         {
             animator.SetBool("BedTime", true);
@@ -6101,7 +6138,7 @@ public class AIAgent : MonoBehaviour
             return;
         }
 
-        // 현재 위치 저장 (나중에 복귀할 위치)
+        // 1단계: 현재 위치 저장
         preHealthPosition = transform.position;
         preHealthRotation = transform.rotation;
 
@@ -6122,6 +6159,15 @@ public class AIAgent : MonoBehaviour
             Debug.Log($"[Health] {gameObject.name}: 현재 위치에서 운동 시작");
         }
         
+        // 2단계: NavMeshAgent 비활성화
+        if (agent != null)
+        {
+            agent.isStopped = true;
+            agent.ResetPath();
+            agent.enabled = false;
+        }
+
+        // 3단계: Point로 순간이동
         // NavMesh 위에서 유효한 위치 찾기
         if (NavMesh.SamplePosition(targetPosition, out NavMeshHit hit, 2f, NavMesh.AllAreas))
         {
@@ -6133,7 +6179,7 @@ public class AIAgent : MonoBehaviour
             transform.position = targetPosition;
         }
         
-        // 회전값 적용
+        // 4단계: 회전값 적용
         transform.rotation = targetRotation;
 
         // 덤벨 활성화 (애니메이션 시작 직전)
@@ -6148,7 +6194,7 @@ public class AIAgent : MonoBehaviour
             Debug.Log($"[Health Props] {gameObject.name}: 오른손 덤벨 활성화");
         }
 
-        // 운동 애니메이션 실행
+        // 5단계: 애니메이션 시작
         if (animator != null)
         {
             animator.SetBool("Exercise", true);
@@ -6444,7 +6490,7 @@ public class AIAgent : MonoBehaviour
             return;
         }
 
-        // 현재 위치 저장 (나중에 복귀할 위치)
+        // 1단계: 현재 위치 저장
         preWeddingPosition = transform.position;
         preWeddingRotation = transform.rotation;
 
@@ -6465,6 +6511,15 @@ public class AIAgent : MonoBehaviour
             Debug.Log($"[Wedding] {gameObject.name}: 현재 위치에서 예식 시작");
         }
         
+        // 2단계: NavMeshAgent 비활성화
+        if (agent != null)
+        {
+            agent.isStopped = true;
+            agent.ResetPath();
+            agent.enabled = false;
+        }
+
+        // 3단계: Point로 순간이동
         // NavMesh 위에서 유효한 위치 찾기
         if (NavMesh.SamplePosition(targetPosition, out NavMeshHit hit, 2f, NavMesh.AllAreas))
         {
@@ -6476,10 +6531,10 @@ public class AIAgent : MonoBehaviour
             transform.position = targetPosition;
         }
         
-        // 회전값 적용
+        // 4단계: 회전값 적용
         transform.rotation = targetRotation;
 
-        // Sitting 애니메이션 실행
+        // 5단계: 애니메이션 시작
         if (animator != null)
         {
             animator.SetBool("Sitting", true);
@@ -6716,15 +6771,29 @@ public class AIAgent : MonoBehaviour
             return;
         }
 
+        // 1단계: 현재 위치 저장
+        preLoungePosition = transform.position;
+        preLoungeRotation = transform.rotation;
+
         currentLoungePoint = loungePoint;
         
-        // AI를 LoungePoint의 위치와 회전으로 정확히 이동
+        // 2단계: NavMeshAgent 비활성화
+        if (agent != null)
+        {
+            agent.isStopped = true;
+            agent.ResetPath();
+            agent.enabled = false;
+        }
+
+        // 3단계: Point로 순간이동
         transform.position = loungePoint.position;
+        
+        // 4단계: 회전값 적용
         transform.rotation = loungePoint.rotation;
         
         Debug.Log($"[라운지 사용 시작] {gameObject.name}: 위치 설정 완료 - LoungePoint: {loungePoint.position}");
 
-        // 앉기 애니메이션 시작
+        // 5단계: 애니메이션 시작
         if (animator != null)
         {
             animator.SetBool("Sitting", true);
@@ -6962,15 +7031,29 @@ public class AIAgent : MonoBehaviour
             return;
         }
 
+        // 1단계: 현재 위치 저장
+        preHallPosition = transform.position;
+        preHallRotation = transform.rotation;
+
         currentHallPoint = hallPoint;
         
-        // AI를 HallPoint의 위치와 회전으로 정확히 이동
+        // 2단계: NavMeshAgent 비활성화
+        if (agent != null)
+        {
+            agent.isStopped = true;
+            agent.ResetPath();
+            agent.enabled = false;
+        }
+
+        // 3단계: Point로 순간이동
         transform.position = hallPoint.position;
+        
+        // 4단계: 회전값 적용
         transform.rotation = hallPoint.rotation;
         
         Debug.Log($"[연회장 사용 시작] {gameObject.name}: 위치 설정 완료 - HallPoint: {hallPoint.position}");
 
-        // 앉기 애니메이션 시작
+        // 5단계: 애니메이션 시작
         if (animator != null)
         {
             animator.SetBool("Sitting", true);
@@ -7335,15 +7418,29 @@ public class AIAgent : MonoBehaviour
             return;
         }
 
+        // 1단계: 현재 위치 저장
+        preSaunaPosition = transform.position;
+        preSaunaRotation = transform.rotation;
+
         currentSaunaPoint = saunaPoint;
         
-        // AI를 사우나 포인트의 위치와 회전으로 정확히 이동
+        // 2단계: NavMeshAgent 비활성화
+        if (agent != null)
+        {
+            agent.isStopped = true;
+            agent.ResetPath();
+            agent.enabled = false;
+        }
+
+        // 3단계: Point로 순간이동
         transform.position = saunaPoint.position;
+        
+        // 4단계: 회전값 적용
         transform.rotation = saunaPoint.rotation;
         
         Debug.Log($"[사우나 사용 시작] {gameObject.name}: 위치 설정 완료 - 사우나 포인트: {saunaPoint.position}");
 
-        // 앉기 또는 눕기 애니메이션 시작
+        // 5단계: 애니메이션 시작
         if (animator != null)
         {
             if (isSaunaSitting)
@@ -7732,15 +7829,29 @@ public class AIAgent : MonoBehaviour
             return;
         }
 
+        // 1단계: 현재 위치 저장
+        preCafePosition = transform.position;
+        preCafeRotation = transform.rotation;
+
         currentCafePoint = cafePoint;
         
-        // AI를 CafePoint의 위치와 회전으로 정확히 이동
+        // 2단계: NavMeshAgent 비활성화
+        if (agent != null)
+        {
+            agent.isStopped = true;
+            agent.ResetPath();
+            agent.enabled = false;
+        }
+
+        // 3단계: Point로 순간이동
         transform.position = cafePoint.position;
+        
+        // 4단계: 회전값 적용
         transform.rotation = cafePoint.rotation;
         
         Debug.Log($"[카페 사용 시작] {gameObject.name}: 위치 설정 완료 - CafePoint: {cafePoint.position}");
 
-        // 앉기 애니메이션 시작
+        // 5단계: 애니메이션 시작
         if (animator != null)
         {
             animator.SetBool("Sitting", true);
@@ -8153,15 +8264,29 @@ public class AIAgent : MonoBehaviour
             return;
         }
 
+        // 1단계: 현재 위치 저장
+        preBathPosition = transform.position;
+        preBathRotation = transform.rotation;
+
         currentBathPoint = bathPoint;
         
-        // AI를 BathPoint의 위치와 회전으로 정확히 이동
+        // 2단계: NavMeshAgent 비활성화
+        if (agent != null)
+        {
+            agent.isStopped = true;
+            agent.ResetPath();
+            agent.enabled = false;
+        }
+
+        // 3단계: Point로 순간이동
         transform.position = bathPoint.position;
+        
+        // 4단계: 회전값 적용
         transform.rotation = bathPoint.rotation;
         
         Debug.Log($"[Bath 사용 시작] {gameObject.name}: 위치 설정 완료 - BathPoint: {bathPoint.position}, 타입: {(isBathSitting ? "Sitting" : "Down")}");
 
-        // 애니메이션 시작 (Sitting 또는 BedTime)
+        // 5단계: 애니메이션 시작 (Sitting 또는 BedTime)
         if (animator != null)
         {
             if (isBathSitting)
@@ -8547,8 +8672,22 @@ public class AIAgent : MonoBehaviour
             return;
         }
 
-        // HosPosition 위치와 회전값으로 정확히 맞추기
+        // 1단계: 현재 위치 저장
+        preHosPosition = transform.position;
+        preHosRotation = transform.rotation;
+
+        // 2단계: NavMeshAgent 비활성화
+        if (agent != null)
+        {
+            agent.isStopped = true;
+            agent.ResetPath();
+            agent.enabled = false;
+        }
+
+        // 3단계: Point로 순간이동
         transform.position = hosPoint.position;
+        
+        // 4단계: 회전값 적용
         transform.rotation = hosPoint.rotation;
 
         Debug.Log($"[Hos 사용 시작] {gameObject.name}: 위치 설정 완료 - HosPoint: {hosPoint.position}");
@@ -8566,20 +8705,15 @@ public class AIAgent : MonoBehaviour
             Debug.LogWarning($"[Hos 사용 시작] {gameObject.name}: ChairPoint 컴포넌트를 찾을 수 없습니다!");
         }
 
-        // 1단계: Sitting 애니메이션 시작
+        // 5단계: 애니메이션 시작
+        // Sitting 애니메이션 시작
         if (animator != null)
         {
             animator.SetBool("Sitting", true);
             Debug.Log($"[Hos 애니메이션] {gameObject.name}: Sitting 애니메이션 시작");
         }
 
-        // NavMeshAgent 비활성화 (자리에 고정)
-        if (agent != null)
-        {
-            agent.enabled = false;
-        }
-
-        // 2단계: Fork 또는 Spoon 랜덤 활성화
+        // Fork 또는 Spoon 랜덤 활성화
         if (forkObject != null && spoonObject != null)
         {
             bool useFork = Random.value > 0.5f;
@@ -8601,7 +8735,7 @@ public class AIAgent : MonoBehaviour
             Debug.LogWarning($"[Hos 도구] {gameObject.name}: Fork 또는 Spoon 오브젝트가 null입니다!");
         }
 
-        // 3단계: Eating 애니메이션 시작
+        // Eating 애니메이션 시작
         if (animator != null)
         {
             animator.SetBool("Eating", true);

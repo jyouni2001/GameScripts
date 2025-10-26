@@ -218,7 +218,8 @@ namespace JY
         /// <summary>
         /// 주문 처리 시작
         /// </summary>
-        public void StartOrderProcessing()
+        /// <returns>주문 처리 시작 성공 여부</returns>
+        public bool StartOrderProcessing()
         {
             DebugLog($"StartOrderProcessing 호출됨 - 처리중: {_isProcessingOrder}, 고용됨: {isHired}, 근무시간: {IsWorkTime}, 작업중: {isWorking}", true);
             DebugLog($"현재시간: {(timeSystem != null ? timeSystem.CurrentHour : -1)}시, 근무시간: {workStartHour}~{workEndHour}시", true);
@@ -226,26 +227,26 @@ namespace JY
             if (_isProcessingOrder)
             {
                 DebugLog("이미 다른 주문을 처리 중입니다.", true);
-                return;
+                return false;
             }
             
             if (!isHired)
             {
                 DebugLog("고용되지 않은 직원입니다.", true);
-                return;
+                return false;
             }
             
             if (!IsWorkTime)
             {
                 DebugLog("근무시간이 아닙니다.", true);
-                return;
+                return false;
             }
             
             // 작업 위치에 도착했는지 확인 (중요!)
             if (!isWorking)
             {
                 DebugLog("아직 작업 위치(WorkPosition_Kitchen)에 도착하지 않았습니다. 주문 불가!", true);
-                return;
+                return false;
             }
             
             DebugLog("주문 처리 시작!", true);
@@ -258,18 +259,24 @@ namespace JY
             }
             
             orderProcessingCoroutine = StartCoroutine(ProcessOrderCoroutine());
+            return true;
         }
         
         /// <summary>
-        /// 주문 처리 코루틴
+        /// 주문 처리 코루틴 (고속 배속 대응) - 주문은 끝까지 처리하고 그 후 퇴근 체크
         /// </summary>
         private IEnumerator ProcessOrderCoroutine()
         {
-            // 1. 주문 받기 (3초 대기) - 작업 위치에서 대기
+            // 1. 주문 받기 (프레임 기반 대기)
             SetState(EmployeeState.ReceivingOrder);
-            CleanUpAnimation(); // 모든 애니메이션 끄기 → 자동으로 Idle
+            CleanUpAnimation();
             DebugLog("주문 받는 중...", true);
-            yield return new WaitForSeconds(3f);
+            
+            // 실제 시간 대신 프레임 대기 (약 30프레임 = 0.5초)
+            for (int i = 0; i < 30; i++)
+            {
+                yield return null;
+            }
             
             // 2. Gas 위치 찾기 및 이동
             if (FindGasPosition())
@@ -278,94 +285,122 @@ namespace JY
                 SetState(EmployeeState.MovingToGas);
                 MoveToPosition(gasPosition);
                 
-                // 인덕션 위치 도착까지 대기
+                // 인덕션 위치 도착까지 대기 (타임아웃만 체크)
+                float timeout = 0f;
                 while (Vector3.Distance(transform.position, gasPosition.position) > 1.5f)
                 {
-                    yield return new WaitForSeconds(0.1f);
+                    timeout += Time.deltaTime;
+                    if (timeout > 10f)
+                    {
+                        DebugLog("⚠️ 인덕션 이동 타임아웃", true);
+                        goto CleanupAndExit;
+                    }
+                    yield return null;
                 }
                 
-                // 3. 인덕션에서 요리 (인덕션 회전값으로 서기)
+                // 3. 인덕션에서 요리
                 SetState(EmployeeState.Cooking);
-                
-                // 인덕션의 위치와 회전값으로 정확히 맞추기
                 transform.position = gasPosition.position;
                 transform.rotation = gasPosition.rotation;
-                DebugLog($"인덕션 위치로 이동 완료 - 위치: {gasPosition.position}, 회전: {gasPosition.rotation.eulerAngles}", true);
+                DebugLog($"인덕션 도착 - 요리 시작", true);
                 
-                // 요리 애니메이션 재생 (웍 활성화 전에 CleanUpAnimation 호출!)
                 CleanUpAnimation();
                 PlayAnimationBool(workAnimationTrigger, true);
                 
-                // 요리 시작 - 웍 오브젝트 활성화 (CleanUpAnimation 이후에!)
                 if (wokObject != null)
                 {
                     wokObject.SetActive(true);
-                    DebugLog("🥘 웍 오브젝트 활성화", true);
+                    DebugLog("🥘 웍 활성화", true);
                 }
                 
-                DebugLog("요리 중...", true);
-                yield return new WaitForSeconds(3f);
+                // 요리 시간 (프레임 기반 - 약 60프레임 = 1초)
+                for (int i = 0; i < 60; i++)
+                {
+                    yield return null;
+                }
                 
                 // 요리 종료 - 웍 비활성화, 접시 활성화
                 PlayAnimationBool(workAnimationTrigger, false);
                 if (wokObject != null)
                 {
                     wokObject.SetActive(false);
-                    DebugLog("🥘 웍 오브젝트 비활성화", true);
+                    DebugLog("🥘 웍 비활성화", true);
                 }
                 
                 if (plateObject != null)
                 {
                     plateObject.SetActive(true);
-                    DebugLog("접시 오브젝트 활성화 (완성된 음식)", true);
+                    DebugLog("접시 활성화", true);
                 }
 
-                // 4. 원래 작업 위치로 복귀 (Picking 애니메이션)
-                DebugLog("작업 위치로 복귀 (접시 들고 - Picking 애니메이션)", true);
+                // 4. 작업 위치로 복귀
+                DebugLog("작업 위치로 복귀", true);
                 PlayAnimationBool("Picking", true);
                 SetState(EmployeeState.Moving);
                 MoveToPosition(workPosition);
                 
-                // 작업 위치 도착까지 대기
+                // 작업 위치 도착까지 대기 (타임아웃만 체크)
+                timeout = 0f;
                 while (workPosition != null && Vector3.Distance(transform.position, workPosition.position) > 1.5f)
                 {
-                    yield return new WaitForSeconds(0.1f);
+                    timeout += Time.deltaTime;
+                    if (timeout > 10f)
+                    {
+                        DebugLog("⚠️ 복귀 타임아웃", true);
+                        goto CleanupAndExit;
+                    }
+                    yield return null;
                 }
 
-                // 5. 작업 위치에서 원래 각도로 복귀
+                // 5. 작업 위치 도착
                 if (workPosition != null)
                 {
                     transform.position = workPosition.position;
                     transform.rotation = workPosition.rotation;
-                    DebugLog($"작업 위치 복귀 완료 - 위치: {workPosition.position}, 회전: {workPosition.rotation.eulerAngles}", true);
+                    DebugLog($"작업 위치 복귀 완료", true);
                 }
                 
-                // 접시 비활성화 (음식 전달 완료)
+                // 6. Picking 애니메이션 종료
+                PlayAnimationBool("Picking", false);
+                
+                // 7. 접시 비활성화
                 if (plateObject != null)
                 {
                     plateObject.SetActive(false);
-                    DebugLog("접시 오브젝트 비활성화 (음식 전달 완료)", true);
+                    DebugLog("접시 비활성화 (전달 완료)", true);
                 }
                 
-                // 음식 전달 완료 - 모든 애니메이션 끄기
-                PlayAnimationBool("Picking", false);
-                CleanUpAnimation(); // 모든 애니메이션 끄기 → 자동으로 Idle
-                SetState(EmployeeState.Working);
+                // 8. 정리
+                CleanUpAnimation();
             }
             else
             {
                 DebugLog("❌ 인덕션을 찾을 수 없습니다!", true);
-                SetState(EmployeeState.Working);
-                CleanUpAnimation(); // 모든 애니메이션 끄기 → 자동으로 Idle
             }
+            
+        CleanupAndExit:
+            // 모든 오브젝트와 애니메이션 정리
+            if (wokObject != null && wokObject.activeSelf)
+            {
+                wokObject.SetActive(false);
+            }
+            if (plateObject != null && plateObject.activeSelf)
+            {
+                plateObject.SetActive(false);
+            }
+            CleanUpAnimation();
             
             _isProcessingOrder = false;
             orderProcessingCoroutine = null;
-            DebugLog("✅ 주문 처리 완료", true);
             
-            // 주문 처리 완료 후 퇴근 시간이면 퇴근
-            if (shouldReturnToSpawn)
+            // Idle 상태로 전환
+            SetState(EmployeeState.Idle);
+            DebugLog("✅ 주문 처리 완료 - Idle", true);
+            
+            // 주문 처리 완료 후에만 퇴근 시간 체크
+            if (shouldReturnToSpawn || !IsWorkTime)
             {
+                DebugLog("주문 완료 후 퇴근 시간 확인 - 스폰 포인트로 복귀", true);
                 ReturnToSpawn();
             }
         }
@@ -1283,11 +1318,8 @@ namespace JY
         /// </summary>
         private void HandleCookingState()
         {
-            // 요리 중 - 애니메이션 확인
-            if (animator != null)
-            {
-                PlayAnimationBool(workAnimationTrigger, true);
-            }
+            // 요리 중 - 코루틴에서 애니메이션 관리하므로 여기서는 아무것도 하지 않음
+            // (매 프레임 애니메이션을 켜면 코루틴에서 끄려고 해도 계속 켜져서 멈춤)
         }
         
         #endregion
@@ -1338,7 +1370,18 @@ namespace JY
                 // 작업 로직 (예: 서빙, 청소 등)
                 PerformWorkAction();
                 
-                yield return new WaitForSeconds(2f); // 2초마다 작업 수행
+                // 프레임 기반 대기 (약 120프레임 = 2초)
+                for (int i = 0; i < 120; i++)
+                {
+                    yield return null;
+                }
+                
+                // 작업 한 사이클 완료 후 퇴근 시간 체크
+                if (!IsWorkTime || shouldReturnToSpawn)
+                {
+                    DebugLog("작업 완료 후 퇴근 시간 확인 - 작업 종료", true);
+                    yield break;
+                }
             }
         }
         
@@ -1413,8 +1456,11 @@ namespace JY
         {
             while (isHired)
             {
-                // 주기적으로 행동 업데이트
-                yield return new WaitForSeconds(1f);
+                // 주기적으로 행동 업데이트 (프레임 기반 - 약 60프레임 = 1초)
+                for (int i = 0; i < 60; i++)
+                {
+                    yield return null;
+                }
             }
         }
         
@@ -1602,7 +1648,7 @@ namespace JY
         {
             if (!isHired) return;
             
-            // 작업 위치가 null인지 확인
+            // ✅ 작업 위치만 체크 (카운터/주방 삭제는 EmployeeHiringSystem에서 처리)
             if (workPosition == null)
             {
                 // 위치 재할당 시도
@@ -1614,17 +1660,11 @@ namespace JY
                 {
                     DebugLog($"❌ 위치 재할당 실패. 태그 '{workPositionTag}'를 확인하세요!", true);
                     
-                    // 30초 후 다시 시도하고, 그래도 실패하면 해고
+                    // 30초 후 다시 시도
                     if (!hasRetryAttempted)
                     {
                         hasRetryAttempted = true;
                         StartCoroutine(RetryPositionAssignment());
-                    }
-                    else
-                    {
-                        // 이미 재시도했으나 실패한 경우 즉시 해고
-                        DebugLog($"🔥 최종 위치 할당 실패! 직원을 즉시 해고합니다.", true);
-                        ReturnToSpawnAndFire();
                     }
                 }
                 else
@@ -1635,37 +1675,20 @@ namespace JY
                 return;
             }
             
-            // workPosition이 실제로 파괴되었는지 확인 (Unity의 null 체크)
+            // ✅ workPosition이 실제로 파괴되었는지 확인
             if (workPosition != null && workPosition.gameObject == null)
             {
-                DebugLog($"🚨 작업 위치 오브젝트가 삭제되었습니다! 직원을 해고하고 스폰 포인트로 이동합니다.", true);
-                ReturnToSpawnAndFire();
+                DebugLog($"⚠️ 작업 위치 오브젝트가 삭제되었습니다. 재할당을 시도합니다.", true);
+                workPosition = null; // null로 설정하고 다음 체크에서 재할당
                 return;
             }
             
-            // 배정된 카운터 체크 (카운터 직원인 경우)
-            if (assignedCounter != null && assignedCounter.gameObject == null)
-            {
-                DebugLog($"🚨 배정된 카운터가 삭제되었습니다! 직원을 해고합니다.", true);
-                ReturnToSpawnAndFire();
-                return;
-            }
-            
-            // 배정된 식당 체크 (식당 직원인 경우)
-            if (assignedKitchen != null && assignedKitchen.gameObject == null)
-            {
-                DebugLog($"🚨 배정된 식당이 삭제되었습니다! 직원을 해고합니다.", true);
-                ReturnToSpawnAndFire();
-                return;
-            }
-            
-            // 인덕션 위치 체크 (요리 중일 때)
+            // ✅ 인덕션 위치만 체크 (요리 중일 때 필요)
             if (gasPosition != null && gasPosition.gameObject == null)
             {
                 DebugLog($"🚨 인덕션이 삭제되었습니다! 주문 처리를 중단합니다.", true);
                 HandleGasDestroyed();
             }
-            
         }
         
         /// <summary>
@@ -1724,8 +1747,11 @@ namespace JY
         /// </summary>
         private System.Collections.IEnumerator DelayedFireAndDestroy()
         {
-            // 스폰 포인트로 이동할 시간 대기
-            yield return new WaitForSeconds(3f);
+            // 스폰 포인트로 이동할 시간 대기 (프레임 기반 - 약 180프레임 = 3초)
+            for (int i = 0; i < 180; i++)
+            {
+                yield return null;
+            }
             
             // 해고 처리
             FireEmployee();
@@ -1773,20 +1799,25 @@ namespace JY
         private System.Collections.IEnumerator RetryPositionAssignment()
         {
             DebugLog("30초 후 위치 할당을 재시도합니다...", true);
-            yield return new WaitForSeconds(30f);
+            
+            // 프레임 기반 대기 (약 1800프레임 = 30초)
+            for (int i = 0; i < 1800; i++)
+            {
+                yield return null;
+            }
             
             // 마지막 재시도
             AssignWorkPositions();
             
             if (workPosition == null)
             {
-                DebugLog($"최종 위치 할당 실패! 태그 '{workPositionTag}'를 가진 오브젝트가 씬에 있는지 확인하세요.", true);
-                DebugLog("직원을 해고하고 스폰 포인트로 이동합니다.", true);
-                ReturnToSpawnAndFire();
+                DebugLog($"⚠️ 최종 위치 할당 실패! 태그 '{workPositionTag}'를 가진 오브젝트가 씬에 있는지 확인하세요.", true);
+                // ✅ 해고는 EmployeeHiringSystem이 처리하도록 함
+                hasRetryAttempted = false; // 다음에 다시 시도할 수 있도록
             }
             else
             {
-                DebugLog($"재시도 성공! 위치 할당됨: {workPosition.name}", true);
+                DebugLog($"✅ 재시도 성공! 위치 할당됨: {workPosition.name}", true);
                 hasRetryAttempted = false;
             }
         }
